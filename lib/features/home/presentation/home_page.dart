@@ -3,9 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/theme.dart';
 import '../../../shared/widgets/bottom_navigation.dart';
-import '../../../shared/homepage/membership_card.dart';
-import '../../../shared/homepage/promo_card.dart';
-import '../../../shared/homepage/location_card.dart';
+import '../widgets/membership_card.dart';
+import '../widgets/promo_card.dart';
+import '../widgets/location_card.dart';
 import '../../../shared/widgets/header_section.dart';
 
 class HomePage extends StatelessWidget {
@@ -123,10 +123,10 @@ class HomePage extends StatelessWidget {
                     context.go('/');
                     break;
                   case 1:
-                    // Navigate to connect
+                    context.go('/connect');
                     break;
                   case 2:
-                    // Navigate to chat
+                    context.go('/chat');
                     break;
                   case 3:
                     context.go('/profiles');

@@ -129,8 +129,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               context.go('/');
               break;
             case 1:
+              context.go('/connect');
               break;
             case 2:
+              context.go('/chat');
               break;
             case 3:
               context.go('/profiles');
