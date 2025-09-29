@@ -18,6 +18,7 @@ class ChatListPage extends ConsumerStatefulWidget {
 
 class _ChatListPageState extends ConsumerState<ChatListPage> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -31,6 +32,7 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -51,54 +53,79 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
         .toList();
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.grey[50],
       body: SafeArea(
         child: Column(
           children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Chat',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: MC.darkBrown,
+            // Header dengan gradient
+            Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [MC.darkBrown, MC.darkBrown.withOpacity(0.8)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.only(
+                  left: 16.0,
+                  top: 20.0,
+                  bottom: 20.0,
+                  right: 16.0,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Chat',
+                      style: TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Percakapan dengan teman dan partner',
-                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    Text(
+                      'Percakapan dengan teman dan partner',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.white.withOpacity(0.9),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
 
-            // Search Bar
+            // Search Bar dengan efek glassmorphism
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16.0,
+                vertical: 16.0,
+              ),
               child: Container(
                 decoration: BoxDecoration(
-                  color: Colors.grey[100],
+                  color: Colors.white.withOpacity(0.9),
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color.fromARGB(50, 0, 0, 0),
-                      blurRadius: 10,
-                      offset: const Offset(0, 2),
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 15,
+                      offset: const Offset(0, 5),
                     ),
                   ],
                 ),
                 child: TextField(
                   controller: _searchController,
+                  style: TextStyle(color: MC.darkBrown),
                   decoration: InputDecoration(
                     hintText: 'Cari percakapan...',
                     hintStyle: TextStyle(color: Colors.grey[400]),
-                    prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
+                    prefixIcon: Icon(
+                      Icons.search,
+                      color: MC.darkBrown.withOpacity(0.7),
+                    ),
                     suffixIcon: _searchController.text.isNotEmpty
                         ? GestureDetector(
                             onTap: () {
@@ -106,7 +133,10 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
                                 _searchController.clear();
                               });
                             },
-                            child: Icon(Icons.clear, color: Colors.grey[400]),
+                            child: Icon(
+                              Icons.clear,
+                              color: MC.darkBrown.withOpacity(0.7),
+                            ),
                           )
                         : null,
                     border: InputBorder.none,
@@ -122,23 +152,36 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
               ),
             ),
 
-            const SizedBox(height: 16),
-
             // Chat List
             Expanded(
               child: chatListState.isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : filteredChatRooms.isEmpty
                   ? Center(
-                      child: Text(
-                        _searchController.text.isNotEmpty
-                            ? 'Tidak ada hasil pencarian'
-                            : 'Tidak ada percakapan',
-                        style: TextStyle(fontSize: 16, color: Colors.grey[500]),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.chat_bubble_outline,
+                            size: 64,
+                            color: Colors.grey[300],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            _searchController.text.isNotEmpty
+                                ? 'Tidak ada hasil pencarian'
+                                : 'Tidak ada percakapan',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
                       ),
                     )
                   : AnimationLimiter(
                       child: ListView.builder(
+                        controller: _scrollController,
                         padding: const EdgeInsets.symmetric(horizontal: 16.0),
                         itemCount: filteredChatRooms.length,
                         itemBuilder: (context, index) {
@@ -191,6 +234,9 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
     required int index,
     required ChatListNotifier chatListNotifier,
   }) {
+    final bool isUnread = (chat['unreadCount'] ?? 0) > 0;
+    final bool isOnline = (chat['isOnline'] as bool?) == true;
+
     return GestureDetector(
       onTap: () {
         // Mark as read when navigating to chat room
@@ -209,13 +255,13 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(12.0),
+        padding: const EdgeInsets.all(16.0),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: isUnread ? Colors.white : Colors.white.withOpacity(0.9),
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: const Color.fromARGB(50, 0, 0, 0),
+              color: Colors.black.withOpacity(0.05),
               blurRadius: 10,
               offset: const Offset(0, 2),
             ),
@@ -226,29 +272,32 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
             // Avatar with online indicator
             Stack(
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(50),
-                  child: Image.network(
-                    chat['avatar'],
-                    width: 60,
-                    height: 60,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        width: 60,
-                        height: 60,
-                        color: const Color.fromARGB(22, 62, 39, 35),
-                        child: const Icon(
-                          Icons.person,
-                          size: 30,
-                          color: MC.darkBrown,
-                        ),
-                      );
-                    },
+                Hero(
+                  tag: 'avatar_${chat['id']}',
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(50),
+                    child: Image.network(
+                      chat['avatar'],
+                      width: 60,
+                      height: 60,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          width: 60,
+                          height: 60,
+                          color: MC.darkBrown.withOpacity(0.1),
+                          child: const Icon(
+                            Icons.person,
+                            size: 30,
+                            color: MC.darkBrown,
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
                 // Online indicator
-                if ((chat['isOnline'] as bool?) == true)
+                if (isOnline)
                   Positioned(
                     bottom: 0,
                     right: 0,
@@ -276,9 +325,11 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
                       Expanded(
                         child: Text(
                           chat['name'],
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                            fontWeight: isUnread
+                                ? FontWeight.bold
+                                : FontWeight.w600,
                             color: MC.darkBrown,
                           ),
                           overflow: TextOverflow.ellipsis,
@@ -286,7 +337,13 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
                       ),
                       Text(
                         _formatTime(chat['lastMessageTime']),
-                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isUnread ? MC.accentOrange : Colors.grey[500],
+                          fontWeight: isUnread
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                        ),
                       ),
                     ],
                   ),
@@ -299,29 +356,38 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
                           chat['lastMessage'],
                           style: TextStyle(
                             fontSize: 14,
-                            color: Colors.grey[600],
+                            color: isUnread ? Colors.black87 : Colors.grey[600],
+                            fontWeight: isUnread
+                                ? FontWeight.w500
+                                : FontWeight.normal,
                           ),
                           overflow: TextOverflow.ellipsis,
                           maxLines: 1,
                         ),
                       ),
-                      // Unread count
-                      if ((chat['unreadCount'] ?? 0) > 0)
+                      // Unread count dengan desain baru
+                      if (isUnread)
                         Container(
+                          constraints: const BoxConstraints(
+                            minWidth: 24,
+                            minHeight: 24,
+                          ),
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
+                            horizontal: 8,
+                            vertical: 4,
                           ),
                           decoration: BoxDecoration(
                             color: MC.accentOrange,
-                            shape: BoxShape.circle,
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                          child: Text(
-                            '${chat['unreadCount']}',
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
+                          child: Center(
+                            child: Text(
+                              '${chat['unreadCount']}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
                         ),

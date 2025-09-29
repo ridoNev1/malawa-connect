@@ -45,16 +45,18 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
       lastSeen: 'Malawa Atrium',
     );
 
-    // Load messages when page is initialized
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(chatRoomProviderFamily(_chatRoom).notifier).loadMessages();
     });
 
     _focusNode.addListener(() {
       if (_focusNode.hasFocus) {
-        ref
-            .read(chatRoomProviderFamily(_chatRoom).notifier)
-            .toggleEmojiPicker();
+        final chatState = ref.read(chatRoomProviderFamily(_chatRoom));
+        if (chatState.showEmojiPicker) {
+          ref
+              .read(chatRoomProviderFamily(_chatRoom).notifier)
+              .toggleEmojiPicker();
+        }
       }
     });
   }
@@ -214,8 +216,7 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
               ),
             ),
 
-            // Emoji Picker
-            if (chatState.showEmojiPicker)
+            if (chatState.showEmojiPicker && !_focusNode.hasFocus)
               EmojiPickerWidget(
                 onEmojiSelected: (emoji) {
                   _insertEmoji(emoji);
