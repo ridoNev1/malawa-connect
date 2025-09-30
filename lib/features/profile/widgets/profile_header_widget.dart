@@ -6,6 +6,9 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/theme.dart';
 import '../providers/profile_provider.dart';
+import '../../../core/services/mock_api.dart';
+import '../../home/providers/home_providers.dart';
+import '../../connect/providers/member_detail_provider.dart';
 
 class ProfileHeaderWidget extends ConsumerWidget {
   final bool isEditable;
@@ -180,24 +183,35 @@ class ProfileHeaderWidget extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 4),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: const BoxDecoration(
-                color: Colors.green,
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 6),
-            const Text(
-              'Online di Malawa Cafe - Sudirman',
-              style: TextStyle(fontSize: 14, color: Colors.black54),
-            ),
-          ],
-        ),
+        // Online indicator (current user uses presenceProvider; other user uses memberByIdProvider)
+        if (isEditable)
+          Consumer(builder: (context, ref, _) {
+            return ref.watch(presenceProvider).when(
+                  data: (presence) {
+                    final online = presence != null;
+                    final label = online
+                        ? 'Online di ${presence['location_name'] ?? '-'}'
+                        : 'Offline';
+                    return _OnlineBadge(online: online, label: label);
+                  },
+                  loading: () => const SizedBox.shrink(),
+                  error: (e, st) => const SizedBox.shrink(),
+                );
+          })
+        else if (userId != null)
+          Consumer(builder: (context, ref, _) {
+            return ref.watch(memberByIdProvider(userId!)).when(
+                  data: (m) {
+                    final online = (m?['isOnline'] as bool?) == true;
+                    final label = online ? 'Online' : 'Terakhir terlihat: ${m?['lastSeen'] ?? '-'}';
+                    return _OnlineBadge(online: online, label: label);
+                  },
+                  loading: () => const SizedBox.shrink(),
+                  error: (e, st) => const SizedBox.shrink(),
+                );
+          })
+        else
+          const SizedBox.shrink(),
 
         // Add connection button for view-only mode
         if (!isEditable) ...[
@@ -282,9 +296,15 @@ class ProfileHeaderWidget extends ConsumerWidget {
             ),
           );
         } else if (value == 'message') {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Fitur chat akan segera hadir!')),
-          );
+          if (userId != null) {
+            if (MockApi.instance.isBlocked(userId!)) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Tidak bisa mengirim pesan ke user yang diblokir')),
+              );
+            } else {
+              _openChat(context, userId!);
+            }
+          }
         }
       },
       itemBuilder: (context) => [
@@ -334,6 +354,42 @@ class ProfileHeaderWidget extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _openChat(BuildContext context, String userId) async {
+    // Ensure a chat exists with this user, then navigate
+    final chat = await MockApi.instance.getOrCreateDirectChatByUserId(userId);
+    if (context.mounted) {
+      context.go('/chat/room/${chat['id']}');
+    }
+  }
+}
+
+class _OnlineBadge extends StatelessWidget {
+  final bool online;
+  final String label;
+  const _OnlineBadge({required this.online, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: online ? Colors.green : Colors.grey,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 14, color: Colors.black54),
+        ),
+      ],
     );
   }
 }

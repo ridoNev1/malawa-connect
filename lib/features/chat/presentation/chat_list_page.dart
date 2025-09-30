@@ -1,4 +1,5 @@
 // lib/features/chat/pages/chat_list_page.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -19,6 +20,7 @@ class ChatListPage extends ConsumerStatefulWidget {
 class _ChatListPageState extends ConsumerState<ChatListPage> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -31,6 +33,7 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -145,9 +148,13 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
                       horizontal: 20,
                     ),
                   ),
-                  onChanged: (value) {
+                onChanged: (value) {
+                  _debounce?.cancel();
+                  _debounce = Timer(const Duration(milliseconds: 300), () {
+                    if (!mounted) return;
                     setState(() {});
-                  },
+                  });
+                },
                 ),
               ),
             ),
@@ -247,8 +254,6 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
           MaterialPageRoute(
             builder: (context) => ChatRoomPage(
               chatId: chat['id'],
-              name: chat['name'],
-              avatar: chat['avatar'],
             ),
           ),
         );

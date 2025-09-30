@@ -6,12 +6,14 @@ class HeaderSection extends StatelessWidget {
   final User? user;
   final int notificationCount;
   final VoidCallback onNotificationTap;
+  final String? displayName;
 
   const HeaderSection({
     super.key,
     required this.user,
     required this.notificationCount,
     required this.onNotificationTap,
+    this.displayName,
   });
 
   @override
@@ -42,7 +44,9 @@ class HeaderSection extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  user?.phone?.replaceRange(0, 2, '+62 ') ?? 'Member',
+                  (displayName != null && displayName!.trim().isNotEmpty)
+                      ? displayName!
+                      : (user?.phone?.replaceRange(0, 2, '+62 ') ?? 'Member'),
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,

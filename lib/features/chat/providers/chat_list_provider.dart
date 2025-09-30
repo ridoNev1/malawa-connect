@@ -1,6 +1,6 @@
 // lib/features/chat/providers/chat_list_provider.dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../data/sample_data.dart';
+import '../../../core/services/mock_api.dart';
 
 class ChatListState {
   final List<Map<String, dynamic>> chatRooms;
@@ -29,10 +29,7 @@ class ChatListNotifier extends Notifier<ChatListState> {
     state = state.copyWith(isLoading: true);
     try {
       // Simulate API call
-      await Future.delayed(const Duration(seconds: 1));
-
-      // Use sample data
-      final chatRooms = getChatListSampleData();
+      final chatRooms = await MockApi.instance.getChatList();
 
       state = state.copyWith(chatRooms: chatRooms);
     } catch (e) {
@@ -42,7 +39,8 @@ class ChatListNotifier extends Notifier<ChatListState> {
     }
   }
 
-  void markAsRead(String chatId) {
+  Future<void> markAsRead(String chatId) async {
+    await MockApi.instance.markChatAsRead(chatId);
     final updatedChatRooms = state.chatRooms.map((chat) {
       if (chat['id'] == chatId) {
         return {...chat, 'unreadCount': 0};

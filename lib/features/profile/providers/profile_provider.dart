@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../../core/services/mock_api.dart';
 import '../models/profile_models.dart';
 
 class ProfileState {
@@ -46,22 +47,19 @@ class ProfileNotifier extends Notifier<ProfileState> {
   Future<void> loadUserData() async {
     state = state.copyWith(isLoading: true);
     try {
-      await Future.delayed(const Duration(seconds: 1));
+      final me = await MockApi.instance.getCurrentUser();
       state = state.copyWith(
         profile: ProfileModel(
-          fullName: 'Sarah Johnson',
-          preference: 'Looking for Friends',
-          interests: ['Coffee', 'Music', 'Travel', 'Photography', 'Art'],
-          galleryImages: [
-            'https://picsum.photos/seed/gallery1/200/200.jpg',
-            'https://picsum.photos/seed/gallery2/200/200.jpg',
-            'https://picsum.photos/seed/gallery3/200/200.jpg',
-            'https://picsum.photos/seed/gallery4/200/200.jpg',
-            'https://picsum.photos/seed/gallery5/200/200.jpg',
-          ],
-          profileImageUrl: 'https://randomuser.me/api/portraits/women/44.jpg',
-          dateOfBirth: DateTime(1992, 5, 15), // Tambahkan ini
-          gender: 'Perempuan', // Tambahkan ini
+          fullName: me['full_name'] ?? '',
+          preference: (me['preference'] ?? 'Looking for Friends').toString(),
+          interests: List<String>.from(me['interests'] ?? const <String>[]),
+          galleryImages:
+              List<String>.from(me['gallery_images'] ?? const <String>[]),
+          profileImageUrl: me['profile_image_url'],
+          dateOfBirth: me['date_of_birth'] != null
+              ? DateTime.tryParse(me['date_of_birth'])
+              : null,
+          gender: me['gender'],
         ),
       );
     } catch (e) {
@@ -75,80 +73,34 @@ class ProfileNotifier extends Notifier<ProfileState> {
   Future<void> loadUserDataById(String userId) async {
     state = state.copyWith(isLoading: true);
     try {
-      await Future.delayed(const Duration(seconds: 1));
-
-      // Mock data based on user ID
-      Map<String, dynamic> mockUserData = {};
-
-      switch (userId) {
-        case '1':
-          mockUserData = {
-            'fullName': 'Michael Chen',
-            'preference': 'Looking for Friends',
-            'interests': ['Coffee', 'Music', 'Travel'],
-            'galleryImages': [
-              'https://picsum.photos/seed/michael1/200/200.jpg',
-              'https://picsum.photos/seed/michael2/200/200.jpg',
-              'https://picsum.photos/seed/michael3/200/200.jpg',
-            ],
-            'profileImageUrl': 'https://randomuser.me/api/portraits/men/32.jpg',
-            'dateOfBirth': DateTime(1988, 8, 20),
-            'gender': 'Laki-laki',
-          };
-          break;
-        case '2':
-          mockUserData = {
-            'fullName': 'Jessica Lee',
-            'preference': 'Looking for Partners',
-            'interests': ['Art', 'Photography', 'Books'],
-            'galleryImages': [
-              'https://picsum.photos/seed/jessica1/200/200.jpg',
-              'https://picsum.photos/seed/jessica2/200/200.jpg',
-              'https://picsum.photos/seed/jessica3/200/200.jpg',
-            ],
-            'profileImageUrl':
-                'https://randomuser.me/api/portraits/women/28.jpg',
-            'dateOfBirth': DateTime(1995, 3, 12),
-            'gender': 'Perempuan',
-          };
-          break;
-        case '3':
-          mockUserData = {
-            'fullName': 'David Wilson',
-            'preference': 'Looking for Friends',
-            'interests': ['Coffee', 'Business', 'Tech'],
-            'galleryImages': [
-              'https://picsum.photos/seed/david1/200/200.jpg',
-              'https://picsum.photos/seed/david2/200/200.jpg',
-            ],
-            'profileImageUrl': 'https://randomuser.me/api/portraits/men/36.jpg',
-            'dateOfBirth': DateTime(1985, 11, 5),
-            'gender': 'Laki-laki',
-          };
-          break;
-        default:
-          mockUserData = {
-            'fullName': 'Unknown User',
-            'preference': 'Looking for Friends',
-            'interests': [],
-            'galleryImages': [],
-            'profileImageUrl': null,
-            'dateOfBirth': null,
-            'gender': null,
-          };
+      final data = await MockApi.instance.getMemberById(userId);
+      if (data == null) {
+        state = state.copyWith(
+          profile: ProfileModel(
+            fullName: 'Unknown User',
+            preference: 'Looking for Friends',
+            interests: const [],
+            galleryImages: const [],
+          ),
+        );
+      } else {
+        state = state.copyWith(
+          profile: ProfileModel(
+            fullName: data['name'] ?? '',
+            preference:
+                (data['preference'] ?? 'Looking for Friends').toString(),
+            interests:
+                List<String>.from(data['interests'] ?? const <String>[]),
+            galleryImages:
+                List<String>.from(data['gallery_images'] ?? const <String>[]),
+            profileImageUrl: data['profile_image_url'],
+            dateOfBirth: data['date_of_birth'] != null
+                ? DateTime.tryParse(data['date_of_birth'])
+                : null,
+            gender: data['gender'],
+          ),
+        );
       }
-
-      state = state.copyWith(
-        profile: ProfileModel(
-          fullName: mockUserData['fullName'],
-          preference: mockUserData['preference'],
-          interests: List<String>.from(mockUserData['interests']),
-          galleryImages: List<String>.from(mockUserData['galleryImages']),
-          profileImageUrl: mockUserData['profileImageUrl'],
-          dateOfBirth: mockUserData['dateOfBirth'],
-          gender: mockUserData['gender'],
-        ),
-      );
     } catch (e) {
       // Handle error
     } finally {
@@ -159,9 +111,12 @@ class ProfileNotifier extends Notifier<ProfileState> {
   Future<void> saveProfile() async {
     state = state.copyWith(isSaving: true);
     try {
-      // Simulate API call
-      await Future.delayed(const Duration(seconds: 1));
-      // Success
+      final me = await MockApi.instance.getCurrentUser();
+      final memberId = (me['member_id'] ?? me['id']).toString();
+      await MockApi.instance.updateProfile(
+        userId: memberId,
+        payload: state.profile.toJson(),
+      );
     } catch (e) {
       // Handle error
     } finally {
@@ -266,6 +221,15 @@ class ProfileNotifier extends Notifier<ProfileState> {
     state = state.copyWith(
       profile: state.profile.copyWith(galleryImages: updatedGalleryImages),
     );
+  }
+
+  // Actions (printed in MockApi)
+  Future<void> blockUser(String userId, {String? reason}) async {
+    await MockApi.instance.blockUser(userId: userId, reason: reason);
+  }
+
+  Future<void> reportUser(String userId, {String? reason}) async {
+    await MockApi.instance.reportUser(userId: userId, reason: reason);
   }
 }
 

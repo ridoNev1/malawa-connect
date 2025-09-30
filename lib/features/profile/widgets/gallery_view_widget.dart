@@ -107,11 +107,7 @@ class GalleryViewWidget extends ConsumerWidget {
                       itemBuilder: (context, index) {
                         return GestureDetector(
                           onTap: () {
-                            _showFullScreenImage(
-                              context,
-                              galleryImages[index],
-                              index,
-                            );
+                            _showFullScreenImage(context, galleryImages, index);
                           },
                           child: Stack(
                             children: [
@@ -177,14 +173,15 @@ class GalleryViewWidget extends ConsumerWidget {
     );
   }
 
-  void _showFullScreenImage(BuildContext context, String imageUrl, int index) {
+  void _showFullScreenImage(
+      BuildContext context, List<String> images, int index) {
     Navigator.of(context).push(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 300),
         reverseTransitionDuration: const Duration(milliseconds: 300),
         pageBuilder: (context, animation, secondaryAnimation) {
           return FullScreenGalleryPage(
-            images: const [], // Will be replaced with actual images
+            images: images,
             initialIndex: index,
             tag: 'gallery_$index', // Unique tag for hero animation
           );
@@ -240,7 +237,7 @@ class _FullScreenGalleryPageState extends State<FullScreenGalleryPage> {
           // Full screen gallery with swipe capability
           PageView.builder(
             controller: _pageController,
-            itemCount: 5, // Using static count for now
+            itemCount: widget.images.length,
             onPageChanged: (index) {
               setState(() {
                 _currentIndex = index;
@@ -252,22 +249,27 @@ class _FullScreenGalleryPageState extends State<FullScreenGalleryPage> {
                   panEnabled: true,
                   minScale: 0.5,
                   maxScale: 4,
-                  child: Image.network(
-                    'https://picsum.photos/seed/gallery${index + 1}/800/1200.jpg',
-                    fit: BoxFit.contain,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        width: double.infinity,
-                        height: double.infinity,
-                        color: MC.darkBrown.withValues(alpha: 0.1),
-                        child: const Icon(
-                          Icons.broken_image,
-                          size: 100,
-                          color: MC.darkBrown,
+                  child: widget.images[index].startsWith('data:image')
+                      ? Image.memory(
+                          base64Decode(widget.images[index].split(',').last),
+                          fit: BoxFit.contain,
+                        )
+                      : Image.network(
+                          widget.images[index],
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              width: double.infinity,
+                              height: double.infinity,
+                              color: MC.darkBrown.withValues(alpha: 0.1),
+                              child: const Icon(
+                                Icons.broken_image,
+                                size: 100,
+                                color: MC.darkBrown,
+                              ),
+                            );
+                          },
                         ),
-                      );
-                    },
-                  ),
                 ),
               );
             },
@@ -380,7 +382,7 @@ class _FullScreenGalleryPageState extends State<FullScreenGalleryPage> {
                     height: 60,
                     child: ListView.builder(
                       scrollDirection: Axis.horizontal,
-                      itemCount: 5,
+                      itemCount: widget.images.length,
                       itemBuilder: (context, index) {
                         final isSelected = index == _currentIndex;
                         return GestureDetector(
@@ -406,10 +408,16 @@ class _FullScreenGalleryPageState extends State<FullScreenGalleryPage> {
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(4),
-                              child: Image.network(
-                                'https://picsum.photos/seed/gallery${index + 1}/100/100.jpg',
-                                fit: BoxFit.cover,
-                              ),
+                              child: widget.images[index].startsWith('data:image')
+                                  ? Image.memory(
+                                      base64Decode(
+                                          widget.images[index].split(',').last),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : Image.network(
+                                      widget.images[index],
+                                      fit: BoxFit.cover,
+                                    ),
                             ),
                           ),
                         );

@@ -6,6 +6,7 @@ import '../../../core/theme/theme.dart';
 import '../../../shared/widgets/bottom_navigation.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/profile_header_widget.dart';
+import '../../../core/services/mock_api.dart';
 import '../widgets/personal_info_view_widget.dart';
 import '../widgets/preference_view_widget.dart';
 import '../widgets/interests_view_widget.dart';
@@ -88,9 +89,17 @@ class _ProfileViewPageState extends ConsumerState<ProfileViewPage> {
         ),
         actions: [
           IconButton(
-            onPressed: () {
-              // Handle message action
-              _showMessageDialog(context);
+            onPressed: () async {
+              if (MockApi.instance.isBlocked(widget.userId)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Tidak bisa mengirim pesan ke user yang diblokir')), 
+                );
+                return;
+              }
+              final chat = await MockApi.instance
+                  .getOrCreateDirectChatByUserId(widget.userId);
+              if (!mounted) return;
+              context.go('/chat/room/${chat['id']}');
             },
             icon: const Icon(Icons.message, color: MC.darkBrown),
           ),
@@ -147,18 +156,7 @@ class _ProfileViewPageState extends ConsumerState<ProfileViewPage> {
     );
   }
 
-  void _showMessageDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Kirim Pesan'),
-        content: const Text('Fitur chat akan segera hadir!'),
-        actions: [
-          TextButton(onPressed: () => context.pop(), child: const Text('OK')),
-        ],
-      ),
-    );
-  }
+  // removed old message dialog (now navigates to chat)
 
   void _showMoreOptions(BuildContext context) {
     showModalBottomSheet(
@@ -204,6 +202,8 @@ class _ProfileViewPageState extends ConsumerState<ProfileViewPage> {
           TextButton(
             onPressed: () {
               context.pop();
+              // Action provider prints payload
+              ref.read(profileProvider.notifier).blockUser(widget.userId);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('User telah diblokir')),
               );
@@ -230,6 +230,8 @@ class _ProfileViewPageState extends ConsumerState<ProfileViewPage> {
           TextButton(
             onPressed: () {
               context.pop();
+              // Action provider prints payload
+              ref.read(profileProvider.notifier).reportUser(widget.userId);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('User telah dilaporkan')),
               );

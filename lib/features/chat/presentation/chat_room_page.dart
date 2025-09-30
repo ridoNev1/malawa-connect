@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart' as image_picker;
 import '../../../core/theme/theme.dart';
+import 'package:go_router/go_router.dart';
 import '../models/chat_room_model.dart';
 import '../providers/chat_room_provider.dart';
 import '../providers/chat_list_provider.dart';
@@ -11,14 +12,10 @@ import '../widgets/emoji_picker_widget.dart';
 
 class ChatRoomPage extends ConsumerStatefulWidget {
   final String chatId;
-  final String name;
-  final String avatar;
 
   const ChatRoomPage({
     super.key,
     required this.chatId,
-    required this.name,
-    required this.avatar,
   });
 
   @override
@@ -36,16 +33,15 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
   @override
   void initState() {
     super.initState();
-    // Create chat room model once
     _chatRoom = ChatRoomModel(
       id: widget.chatId,
-      name: widget.name,
-      avatar: widget.avatar,
-      isOnline: true,
-      lastSeen: 'Malawa Atrium',
+      name: '',
+      avatar: '',
+      isOnline: false,
+      lastSeen: '',
     );
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(chatRoomProviderFamily(_chatRoom).notifier).loadRoom();
       ref.read(chatRoomProviderFamily(_chatRoom).notifier).loadMessages();
     });
 
@@ -73,6 +69,7 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatRoomProviderFamily(_chatRoom));
     final chatNotifier = ref.read(chatRoomProviderFamily(_chatRoom).notifier);
+    final room = chatState.chatRoom;
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -116,81 +113,88 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  // User Avatar
-                  Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: Image.network(
-                          widget.avatar,
-                          width: 45,
-                          height: 45,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              width: 45,
-                              height: 45,
-                              color: const Color.fromARGB(22, 62, 39, 35),
-                              child: const Icon(
-                                Icons.person,
-                                size: 22,
-                                color: MC.darkBrown,
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      // Online indicator
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          width: 15,
-                          height: 15,
-                          decoration: BoxDecoration(
-                            color: Colors.green,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(width: 12),
-                  // User Info
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.name,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: MC.darkBrown,
+                    child: InkWell(
+                      onTap: () => context.go('/profile/view/${room.id}'),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Row(
+                        children: [
+                          Stack(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(20),
+                                child: Image.network(
+                                  room.avatar,
+                                  width: 45,
+                                  height: 45,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Container(
+                                      width: 45,
+                                      height: 45,
+                                      color: const Color.fromARGB(22, 62, 39, 35),
+                                      child: const Icon(
+                                        Icons.person,
+                                        size: 22,
+                                        color: MC.darkBrown,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: Container(
+                                  width: 15,
+                                  height: 15,
+                                  decoration: BoxDecoration(
+                                    color: Colors.green,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: Colors.white, width: 2),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                        Row(
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: Colors.green,
-                                shape: BoxShape.circle,
-                              ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  room.name.isEmpty ? '...' : room.name,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: MC.darkBrown,
+                                  ),
+                                ),
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: const BoxDecoration(
+                                        color: Colors.green,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      room.lastSeen.isEmpty ? '-' : room.lastSeen,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.green[600],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Malawa Atrium',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.green[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -199,19 +203,36 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
 
             // Chat Messages
             Expanded(
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                child: ListView.builder(
-                  controller: _scrollController,
-                  itemCount: chatState.messages.length,
-                  itemBuilder: (context, index) {
-                    final message = chatState.messages[index];
-                    return ChatBubbleWidget(
-                      message: message,
-                      avatarUrl: widget.avatar,
-                      index: index,
-                    );
-                  },
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (notif) {
+                  if (notif.metrics.pixels <= 80 && !chatState.isLoadingMore) {
+                    chatNotifier.loadMore();
+                  }
+                  return false;
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  child: ListView.builder(
+                    controller: _scrollController,
+                    itemCount: chatState.messages.length + 1,
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        return chatState.isLoadingMore
+                            ? const Padding(
+                                padding: EdgeInsets.only(bottom: 12.0),
+                                child: Center(
+                                    child: CircularProgressIndicator(strokeWidth: 2)),
+                              )
+                            : const SizedBox.shrink();
+                      }
+                      final message = chatState.messages[index - 1];
+                      return ChatBubbleWidget(
+                        message: message,
+                        avatarUrl: room.avatar,
+                        index: index - 1,
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
@@ -241,9 +262,9 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
   void _sendMessage() {
     if (_messageController.text.trim().isEmpty) return;
 
-    ref
-        .read(chatRoomProviderFamily(_chatRoom).notifier)
-        .sendMessage(_messageController.text);
+    ref.read(chatRoomProviderFamily(_chatRoom).notifier).sendMessage(
+          _messageController.text,
+        );
 
     // Update chat list with last message
     ref
