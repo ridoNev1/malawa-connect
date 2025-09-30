@@ -12,7 +12,7 @@ class InterestsWidget extends ConsumerWidget {
     final interests = ref.watch(profileProvider).profile.interests;
     final notifier = ref.read(profileProvider.notifier);
 
-    void _showAddInterestDialog() {
+    void showAddInterestDialog() {
       final TextEditingController controller = TextEditingController();
 
       showDialog(
@@ -57,7 +57,7 @@ class InterestsWidget extends ConsumerWidget {
               ),
             ),
             TextButton.icon(
-              onPressed: _showAddInterestDialog,
+              onPressed: showAddInterestDialog,
               icon: const Icon(Icons.add, size: 18),
               label: const Text('Tambah'),
               style: TextButton.styleFrom(foregroundColor: MC.accentOrange),

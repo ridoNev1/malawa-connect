@@ -78,7 +78,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const ProfileHeaderWidget(),
+            const ProfileHeaderWidget(isEditable: true),
             const SizedBox(height: 32),
             const PersonalInfoWidget(),
             const SizedBox(height: 32),

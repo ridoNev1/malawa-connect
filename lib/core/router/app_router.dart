@@ -4,6 +4,7 @@ import 'package:malawa_connect/features/chat/presentation/chat_list_page.dart';
 import 'package:malawa_connect/features/chat/presentation/chat_room_page.dart';
 import 'package:malawa_connect/features/connect/presentation/connect_page.dart';
 import 'package:malawa_connect/features/profile/presentation/profile_page.dart';
+import 'package:malawa_connect/features/profile/presentation/profile_view_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../features/auth/presentation/login_page.dart';
@@ -23,7 +24,17 @@ final appRouter = GoRouter(
       },
     ),
     GoRoute(path: '/', builder: (_, __) => const HomePage()),
-    GoRoute(path: '/profiles', builder: (_, __) => const ProfilePage()),
+    GoRoute(
+      path: '/profiles',
+      builder: (context, state) => const ProfilePage(),
+    ),
+    GoRoute(
+      path: '/profile/view/:userId',
+      builder: (context, state) {
+        final userId = state.pathParameters['userId']!;
+        return ProfileViewPage(userId: userId);
+      },
+    ),
     GoRoute(path: '/connect', builder: (context, state) => const ConnectPage()),
     // Update chat routes
     GoRoute(path: '/chat', builder: (context, state) => const ChatListPage()),
@@ -46,7 +57,6 @@ final appRouter = GoRouter(
 );
 
 Map<String, dynamic> _getChatData(String chatId) {
-  // This would normally come from an API or database
   final List<Map<String, dynamic>> chatList = [
     {
       'id': '1',

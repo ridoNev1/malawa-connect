@@ -60,6 +60,8 @@ class ProfileNotifier extends Notifier<ProfileState> {
             'https://picsum.photos/seed/gallery5/200/200.jpg',
           ],
           profileImageUrl: 'https://randomuser.me/api/portraits/women/44.jpg',
+          dateOfBirth: DateTime(1992, 5, 15), // Tambahkan ini
+          gender: 'Perempuan', // Tambahkan ini
         ),
       );
     } catch (e) {
@@ -69,7 +71,91 @@ class ProfileNotifier extends Notifier<ProfileState> {
     }
   }
 
-  // TAMBAHKAN METODE INI
+  // New method to load user data by ID
+  Future<void> loadUserDataById(String userId) async {
+    state = state.copyWith(isLoading: true);
+    try {
+      await Future.delayed(const Duration(seconds: 1));
+
+      // Mock data based on user ID
+      Map<String, dynamic> mockUserData = {};
+
+      switch (userId) {
+        case '1':
+          mockUserData = {
+            'fullName': 'Michael Chen',
+            'preference': 'Looking for Friends',
+            'interests': ['Coffee', 'Music', 'Travel'],
+            'galleryImages': [
+              'https://picsum.photos/seed/michael1/200/200.jpg',
+              'https://picsum.photos/seed/michael2/200/200.jpg',
+              'https://picsum.photos/seed/michael3/200/200.jpg',
+            ],
+            'profileImageUrl': 'https://randomuser.me/api/portraits/men/32.jpg',
+            'dateOfBirth': DateTime(1988, 8, 20),
+            'gender': 'Laki-laki',
+          };
+          break;
+        case '2':
+          mockUserData = {
+            'fullName': 'Jessica Lee',
+            'preference': 'Looking for Partners',
+            'interests': ['Art', 'Photography', 'Books'],
+            'galleryImages': [
+              'https://picsum.photos/seed/jessica1/200/200.jpg',
+              'https://picsum.photos/seed/jessica2/200/200.jpg',
+              'https://picsum.photos/seed/jessica3/200/200.jpg',
+            ],
+            'profileImageUrl':
+                'https://randomuser.me/api/portraits/women/28.jpg',
+            'dateOfBirth': DateTime(1995, 3, 12),
+            'gender': 'Perempuan',
+          };
+          break;
+        case '3':
+          mockUserData = {
+            'fullName': 'David Wilson',
+            'preference': 'Looking for Friends',
+            'interests': ['Coffee', 'Business', 'Tech'],
+            'galleryImages': [
+              'https://picsum.photos/seed/david1/200/200.jpg',
+              'https://picsum.photos/seed/david2/200/200.jpg',
+            ],
+            'profileImageUrl': 'https://randomuser.me/api/portraits/men/36.jpg',
+            'dateOfBirth': DateTime(1985, 11, 5),
+            'gender': 'Laki-laki',
+          };
+          break;
+        default:
+          mockUserData = {
+            'fullName': 'Unknown User',
+            'preference': 'Looking for Friends',
+            'interests': [],
+            'galleryImages': [],
+            'profileImageUrl': null,
+            'dateOfBirth': null,
+            'gender': null,
+          };
+      }
+
+      state = state.copyWith(
+        profile: ProfileModel(
+          fullName: mockUserData['fullName'],
+          preference: mockUserData['preference'],
+          interests: List<String>.from(mockUserData['interests']),
+          galleryImages: List<String>.from(mockUserData['galleryImages']),
+          profileImageUrl: mockUserData['profileImageUrl'],
+          dateOfBirth: mockUserData['dateOfBirth'],
+          gender: mockUserData['gender'],
+        ),
+      );
+    } catch (e) {
+      // Handle error
+    } finally {
+      state = state.copyWith(isLoading: false);
+    }
+  }
+
   Future<void> saveProfile() async {
     state = state.copyWith(isSaving: true);
     try {
@@ -91,6 +177,18 @@ class ProfileNotifier extends Notifier<ProfileState> {
     state = state.copyWith(
       profile: state.profile.copyWith(preference: preference),
     );
+  }
+
+  // New method to update date of birth
+  void updateDateOfBirth(DateTime dateOfBirth) {
+    state = state.copyWith(
+      profile: state.profile.copyWith(dateOfBirth: dateOfBirth),
+    );
+  }
+
+  // New method to update gender
+  void updateGender(String? gender) {
+    state = state.copyWith(profile: state.profile.copyWith(gender: gender));
   }
 
   void addInterest(String interest) {

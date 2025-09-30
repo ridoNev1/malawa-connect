@@ -2,12 +2,24 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/theme.dart';
 import '../providers/profile_provider.dart';
 
 class ProfileHeaderWidget extends ConsumerWidget {
-  const ProfileHeaderWidget({super.key});
+  final bool isEditable;
+  final String? userId;
+  final bool isConnected;
+  final Function(bool)? onConnectionChanged;
+
+  const ProfileHeaderWidget({
+    super.key,
+    this.isEditable = true,
+    this.userId,
+    this.isConnected = false,
+    this.onConnectionChanged,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -44,85 +56,118 @@ class ProfileHeaderWidget extends ConsumerWidget {
       );
     }
 
+    void showFullScreenImage() {
+      if (profile.profileImageUrl == null) return;
+
+      Navigator.of(context).push(
+        PageRouteBuilder(
+          transitionDuration: const Duration(milliseconds: 300),
+          reverseTransitionDuration: const Duration(milliseconds: 300),
+          pageBuilder: (context, animation, secondaryAnimation) {
+            return FullScreenProfileImagePage(
+              imageUrl: profile.profileImageUrl!,
+              tag: 'profile_image',
+              userId: userId, // Pass userId to the full screen page
+            );
+          },
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
+    }
+
     return Column(
       children: [
         Stack(
           children: [
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: MC.darkBrown.withValues(alpha: 0.2),
-                  width: 4,
-                ),
-              ),
-              child: ClipOval(
-                child: profile.profileImageUrl != null
-                    ? profile.profileImageUrl!.startsWith('data:image')
-                          ? Image.memory(
-                              base64Decode(
-                                profile.profileImageUrl!.split(',').last,
-                              ),
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  color: MC.darkBrown.withValues(alpha: 0.1),
-                                  child: const Icon(
-                                    Icons.person,
-                                    size: 60,
-                                    color: MC.darkBrown,
-                                  ),
-                                );
-                              },
-                            )
-                          : Image.network(
-                              profile.profileImageUrl!,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  color: MC.darkBrown.withValues(alpha: 0.1),
-                                  child: const Icon(
-                                    Icons.person,
-                                    size: 60,
-                                    color: MC.darkBrown,
-                                  ),
-                                );
-                              },
-                            )
-                    : Container(
-                        color: MC.darkBrown.withValues(alpha: 0.1),
-                        child: const Icon(
-                          Icons.person,
-                          size: 60,
-                          color: MC.darkBrown,
-                        ),
+            GestureDetector(
+              onTap: showFullScreenImage,
+              child: Stack(
+                children: [
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: MC.darkBrown.withValues(alpha: 0.2),
+                        width: 4,
                       ),
+                    ),
+                    child: ClipOval(
+                      child: profile.profileImageUrl != null
+                          ? profile.profileImageUrl!.startsWith('data:image')
+                                ? Image.memory(
+                                    base64Decode(
+                                      profile.profileImageUrl!.split(',').last,
+                                    ),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Container(
+                                        color: MC.darkBrown.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        child: const Icon(
+                                          Icons.person,
+                                          size: 60,
+                                          color: MC.darkBrown,
+                                        ),
+                                      );
+                                    },
+                                  )
+                                : Image.network(
+                                    profile.profileImageUrl!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Container(
+                                        color: MC.darkBrown.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        child: const Icon(
+                                          Icons.person,
+                                          size: 60,
+                                          color: MC.darkBrown,
+                                        ),
+                                      );
+                                    },
+                                  )
+                          : Container(
+                              color: MC.darkBrown.withValues(alpha: 0.1),
+                              child: const Icon(
+                                Icons.person,
+                                size: 60,
+                                color: MC.darkBrown,
+                              ),
+                            ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            Positioned(
-              bottom: 0,
-              right: 0,
-              child: InkWell(
-                onTap: showImagePicker,
-                borderRadius: BorderRadius.circular(20),
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: MC.darkBrown,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 3),
-                  ),
-                  child: const Icon(
-                    Icons.camera_alt,
-                    color: Colors.white,
-                    size: 20,
+            if (isEditable)
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: InkWell(
+                  onTap: showImagePicker,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: MC.darkBrown,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 3),
+                    ),
+                    child: const Icon(
+                      Icons.camera_alt,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
         const SizedBox(height: 16),
@@ -153,7 +198,311 @@ class ProfileHeaderWidget extends ConsumerWidget {
             ),
           ],
         ),
+
+        // Add connection button for view-only mode
+        if (!isEditable) ...[
+          const SizedBox(height: 16),
+          isConnected
+              ? _buildConnectedButton(context)
+              : _buildRequestConnectButton(context),
+        ],
+
+        // Add some additional info for view-only mode
+        if (!isEditable) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.green[50],
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.verified, color: Colors.green, size: 16),
+                SizedBox(width: 6),
+                Text(
+                  'Member Terverifikasi',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.green,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
+    );
+  }
+
+  Widget _buildRequestConnectButton(BuildContext context) {
+    return OutlinedButton(
+      onPressed: () {
+        if (onConnectionChanged != null) {
+          onConnectionChanged!(true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Permintaan koneksi telah dikirim'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      },
+      style: OutlinedButton.styleFrom(
+        foregroundColor: MC.darkBrown,
+        side: const BorderSide(color: MC.darkBrown),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.person_add, size: 18),
+          SizedBox(width: 8),
+          Text(
+            'Request Connect',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConnectedButton(BuildContext context) {
+    return PopupMenuButton<String>(
+      onSelected: (value) {
+        if (value == 'disconnect' && onConnectionChanged != null) {
+          onConnectionChanged!(false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Koneksi telah diputus'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        } else if (value == 'message') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Fitur chat akan segera hadir!')),
+          );
+        }
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'message',
+          child: Row(
+            children: [
+              Icon(Icons.message),
+              SizedBox(width: 8),
+              Text('Kirim Pesan'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'disconnect',
+          child: Row(
+            children: [
+              Icon(Icons.person_remove, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Putus Koneksi', style: TextStyle(color: Colors.red)),
+            ],
+          ),
+        ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.green[100],
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.green[300]!),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.check_circle, color: Colors.green, size: 18),
+            SizedBox(width: 8),
+            Text(
+              'Connected',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.green,
+              ),
+            ),
+            SizedBox(width: 4),
+            Icon(Icons.arrow_drop_down, color: Colors.green),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Full screen profile image page
+class FullScreenProfileImagePage extends StatelessWidget {
+  final String imageUrl;
+  final String tag;
+  final String? userId; // Add userId parameter
+
+  const FullScreenProfileImagePage({
+    super.key,
+    required this.imageUrl,
+    required this.tag,
+    this.userId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          Center(
+            child: Hero(
+              tag: tag,
+              child: InteractiveViewer(
+                panEnabled: true,
+                minScale: 0.5,
+                maxScale: 4,
+                child: imageUrl.startsWith('data:image')
+                    ? Image.memory(
+                        base64Decode(imageUrl.split(',').last),
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            width: double.infinity,
+                            height: double.infinity,
+                            color: MC.darkBrown.withValues(alpha: 0.1),
+                            child: const Icon(
+                              Icons.person,
+                              size: 100,
+                              color: MC.darkBrown,
+                            ),
+                          );
+                        },
+                      )
+                    : Image.network(
+                        imageUrl,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            width: double.infinity,
+                            height: double.infinity,
+                            color: MC.darkBrown.withValues(alpha: 0.1),
+                            child: const Icon(
+                              Icons.person,
+                              size: 100,
+                              color: MC.darkBrown,
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ),
+          ),
+
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.only(top: 40, left: 16, right: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  GestureDetector(
+                    onTap: () async {
+                      bool popped = await Navigator.of(context).maybePop();
+                      if (!popped) {
+                        if (userId != null) {
+                          context.go('/profile/view/$userId');
+                        } else {
+                          context.go('/connect');
+                        }
+                      }
+                    },
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.arrow_back, color: Colors.white),
+                    ),
+                  ),
+
+                  // More options
+                  PopupMenuButton<String>(
+                    icon: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.more_vert, color: Colors.white),
+                    ),
+                    onSelected: (value) {
+                      if (value == 'download') {
+                        // Handle download
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Fitur download akan segera hadir!'),
+                          ),
+                        );
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'download',
+                        child: Row(
+                          children: [
+                            Icon(Icons.download),
+                            SizedBox(width: 8),
+                            Text('Download Gambar'),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Bottom info bar
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.7),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.zoom_in, color: Colors.white, size: 16),
+                  SizedBox(width: 4),
+                  Text(
+                    'Pinch to zoom',
+                    style: TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
