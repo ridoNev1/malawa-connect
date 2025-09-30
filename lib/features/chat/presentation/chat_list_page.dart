@@ -186,28 +186,58 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
                         ],
                       ),
                     )
-                  : AnimationLimiter(
-                      child: ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                        itemCount: filteredChatRooms.length,
-                        itemBuilder: (context, index) {
-                          final chat = filteredChatRooms[index];
-                          return AnimationConfiguration.staggeredList(
-                            position: index,
-                            duration: const Duration(milliseconds: 375),
-                            child: SlideAnimation(
-                              verticalOffset: 50.0,
-                              child: FadeInAnimation(
-                                child: _buildChatListItem(
-                                  chat: chat,
-                                  index: index,
-                                  chatListNotifier: chatListNotifier,
+                  : NotificationListener<ScrollNotification>(
+                      onNotification: (scrollInfo) {
+                        if (scrollInfo.metrics.pixels >=
+                                scrollInfo.metrics.maxScrollExtent - 200 &&
+                            !chatListState.isLoadingMore &&
+                            chatListState.hasMore) {
+                          ref.read(chatListProvider.notifier).loadMore();
+                        }
+                        return false;
+                      },
+                      child: AnimationLimiter(
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 16.0),
+                          itemCount: filteredChatRooms.length + 1,
+                          itemBuilder: (context, index) {
+                            if (index == filteredChatRooms.length) {
+                              return Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12.0),
+                                child: Center(
+                                  child: chatListState.isLoadingMore
+                                      ? const CircularProgressIndicator()
+                                      : (chatListState.hasMore
+                                          ? const SizedBox.shrink()
+                                          : Text(
+                                              'Semua percakapan telah ditampilkan',
+                                              style: TextStyle(
+                                                color: Colors.grey[500],
+                                              ),
+                                            )),
+                                ),
+                              );
+                            }
+                            final chat = filteredChatRooms[index];
+                            return AnimationConfiguration.staggeredList(
+                              position: index,
+                              duration: const Duration(milliseconds: 375),
+                              child: SlideAnimation(
+                                verticalOffset: 50.0,
+                                child: FadeInAnimation(
+                                  child: _buildChatListItem(
+                                    chat: chat,
+                                    index: index,
+                                    chatListNotifier: chatListNotifier,
+                                  ),
                                 ),
                               ),
-                            ),
-                          );
-                        },
+                            );
+                          },
+                        ),
                       ),
                     ),
             ),

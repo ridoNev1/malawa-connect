@@ -647,7 +647,7 @@ class MockApi {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getChatList({String? search}) async {
+  Future<List<Map<String, dynamic>>> getChatList({String? search, int? limit, int? offset}) async {
     await Future.delayed(const Duration(milliseconds: 250));
     // Ensure a chat entry exists for all connected members (even with zero messages)
     for (final m in _members) {
@@ -704,7 +704,24 @@ class MockApi {
           )
           .toList();
     }
-    return list;
+    // Sort by lastMessageTime desc, null last
+    list.sort((a, b) {
+      final sa = a['lastMessageTime'] as String?;
+      final sb = b['lastMessageTime'] as String?;
+      if (sa == null && sb == null) return 0;
+      if (sa == null) return 1;
+      if (sb == null) return -1;
+      final da = DateTime.tryParse(sa);
+      final db = DateTime.tryParse(sb);
+      if (da == null && db == null) return 0;
+      if (da == null) return 1;
+      if (db == null) return -1;
+      return db.compareTo(da);
+    });
+    // Pagination
+    final start = (offset ?? 0).clamp(0, list.length);
+    final end = limit != null ? (start + limit).clamp(0, list.length) : list.length;
+    return list.sublist(start, end);
   }
 
   Future<Map<String, dynamic>?> getChatById(String chatId) async {

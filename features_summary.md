@@ -45,6 +45,7 @@ This document lists all features currently implemented in the app, how they fetc
 
 **Chat**
 - Chat list: `chatListProvider.loadChatRooms()` → `MockApi.getChatList()`.
+- Chat list pagination: page size 20; loads first 20 on open, loads more when scrolling near bottom.
 - Room header: tappable; opens the profile of the other user (`/profile/view/:id`).
 - Messages: `chatRoomProviderFamily(chatRoom).loadMessages()` → `MockApi.getChatMessages(chatId)`.
 - Messages pagination: page size 50; loads latest 50 on open, loads older on scroll-to-top.
