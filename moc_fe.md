@@ -85,8 +85,8 @@ ChatListItem {
   id: string,                   // chat id; in mock equals member legacy id
   name: string,
   avatar: string,
-  lastMessage: string,
-  lastMessageTime: string,      // ISO
+  lastMessage: string|null,     // null when no messages yet
+  lastMessageTime: string|null, // ISO or null when no messages yet
   unreadCount: number,
   isOnline: boolean
 }
@@ -313,6 +313,12 @@ Nearest Filter Logic (recap)
 - Else: base = currentUser.location_id
 - getMembers('nearest') filters members by base location.
 
+Online Semantics (Mock + Target)
+- Definition: Online = user has an active presence (checked-in) with a heartbeat within TTL; Offline otherwise.
+- Mock TTL: presenceTtlSeconds = 120 (see MockApi).
+- Current user: presence is maintained by the app (checkIn/heartbeat/checkOut).
+- Other members: isOnline is derived server-side from presence – in mock, computed per request from last_heartbeat_at; when online, their presence location_id overrides base location for display (e.g., chat header “Online di <lokasi>”).
+
 **Identifiers**
 
 - `id` (number): legacy PK from existing table.
@@ -407,6 +413,10 @@ Nearest Filter Logic (recap)
   - `id` string(uuid), `name` string, `avatar` string
   - `lastMessage` string, `lastMessageTime` ISO string
   - `unreadCount` int, `isOnline` bool
+
+- Behavior
+  - Chat list includes all accepted connections, even if there are no messages yet.
+  - For chats with no messages, FE displays a friendly placeholder (e.g., "Belum ada percakapan").
 
 **Chat Room (Header)**
 

@@ -9,6 +9,8 @@ import '../providers/chat_list_provider.dart';
 import '../widgets/chat_bubble_widget.dart';
 import '../widgets/chat_input_widget.dart';
 import '../widgets/emoji_picker_widget.dart';
+import '../../connect/providers/member_detail_provider.dart';
+import '../../../core/services/mock_api.dart';
 
 class ChatRoomPage extends ConsumerStatefulWidget {
   final String chatId;
@@ -29,6 +31,7 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
   final image_picker.ImagePicker _imagePicker = image_picker.ImagePicker();
 
   late final ChatRoomModel _chatRoom;
+  bool _didInitialScroll = false;
 
   @override
   void initState() {
@@ -70,12 +73,27 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
     final chatState = ref.watch(chatRoomProviderFamily(_chatRoom));
     final chatNotifier = ref.read(chatRoomProviderFamily(_chatRoom).notifier);
     final room = chatState.chatRoom;
+    final memberAsync = ref.watch(memberByIdProvider(room.id));
+    final locationsAsync = ref.watch(chatLocationsProvider);
+    bool headerOnline = false;
+    if (memberAsync.hasValue && memberAsync.value != null) {
+      headerOnline = (memberAsync.value!['isOnline'] as bool?) == true;
+    }
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
       body: SafeArea(
         child: Column(
           children: [
+            // Auto scroll to bottom once after initial load
+            if (!_didInitialScroll && !chatState.isLoading && chatState.messages.isNotEmpty)
+              (() {
+                _didInitialScroll = true;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+                });
+                return const SizedBox.shrink();
+              }()),
             // Chat Header
             Container(
               padding: const EdgeInsets.symmetric(
@@ -96,7 +114,11 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
                 children: [
                   GestureDetector(
                     onTap: () {
-                      Navigator.pop(context);
+                      if (context.canPop()) {
+                        context.pop();
+                      } else {
+                        context.go('/chat');
+                      }
                     },
                     child: Container(
                       width: 40,
@@ -115,7 +137,7 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: InkWell(
-                      onTap: () => context.go('/profile/view/${room.id}'),
+                      onTap: () => context.push('/profile/view/${room.id}'),
                       borderRadius: BorderRadius.circular(12),
                       child: Row(
                         children: [
@@ -149,7 +171,7 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
                                   width: 15,
                                   height: 15,
                                   decoration: BoxDecoration(
-                                    color: Colors.green,
+                                    color: headerOnline ? Colors.green : Colors.grey,
                                     shape: BoxShape.circle,
                                     border: Border.all(color: Colors.white, width: 2),
                                   ),
@@ -170,26 +192,54 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
                                     color: MC.darkBrown,
                                   ),
                                 ),
-                                Row(
-                                  children: [
-                                    Container(
-                                      width: 8,
-                                      height: 8,
-                                      decoration: const BoxDecoration(
-                                        color: Colors.green,
-                                        shape: BoxShape.circle,
+                                Builder(builder: (context) {
+                                  String label = '...';
+                                  Color color = Colors.grey[600]!;
+                                  bool online = false;
+                                  if (memberAsync.hasValue && memberAsync.value != null) {
+                                    final m = memberAsync.value!;
+                                    online = (m['isOnline'] as bool?) == true;
+                                    if (online) {
+                                      String locName = '-';
+                                      final locId = m['location_id'] as int?;
+                                      if (locationsAsync.hasValue) {
+                                        final locs = locationsAsync.value!;
+                                        final found = locs.firstWhere(
+                                          (e) => e['id'] == locId,
+                                          orElse: () => {},
+                                        );
+                                        if (found.isNotEmpty) {
+                                          locName = (found['name'] ?? '-').toString();
+                                        }
+                                      }
+                                      label = 'Online di $locName';
+                                      color = Colors.green[600]!;
+                                    } else {
+                                      label = 'Out of Coffee';
+                                      color = Colors.grey[600]!;
+                                    }
+                                  }
+                                  return Row(
+                                    children: [
+                                      Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: BoxDecoration(
+                                          color: online ? Colors.green : Colors.grey,
+                                          shape: BoxShape.circle,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      room.lastSeen.isEmpty ? '-' : room.lastSeen,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.green[600],
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        label,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: color,
+                                        ),
                                       ),
-                                    ),
-                                  ],
-                                ),
+                                    ],
+                                  );
+                                }),
                               ],
                             ),
                           ),
@@ -212,7 +262,25 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
                 },
                 child: Container(
                   padding: const EdgeInsets.all(16),
-                  child: ListView.builder(
+                  child: chatState.messages.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.chat_bubble_outline,
+                                  size: 64, color: Colors.grey[300]),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Belum ada percakapan',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.grey[500],
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
                     controller: _scrollController,
                     itemCount: chatState.messages.length + 1,
                     itemBuilder: (context, index) {
@@ -409,3 +477,8 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
     });
   }
 }
+
+final chatLocationsProvider =
+    FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  return await MockApi.instance.getLocations();
+});

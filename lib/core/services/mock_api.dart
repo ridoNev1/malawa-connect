@@ -64,6 +64,7 @@ class MembersQuery {
 class MockApi {
   MockApi._();
   static final MockApi instance = MockApi._();
+  static const int presenceTtlSeconds = 120;
 
   // Current user mock (can be extended)
   Map<String, dynamic> currentUser = {
@@ -296,6 +297,17 @@ class MockApi {
     },
   ];
 
+  // Simulated presence for other members (TTL-based; keyed by legacy string id)
+  final Map<String, Map<String, dynamic>> _memberPresence = {
+    '1': {
+      'location_id': 7,
+      'check_in_time': null,
+      'last_heartbeat_at': "INIT", // placeholder
+    },
+    '2': {'location_id': 7, 'check_in_time': null, 'last_heartbeat_at': "INIT"},
+    '6': {'location_id': 8, 'check_in_time': null, 'last_heartbeat_at': "INIT"},
+  };
+
   // Blocked users by current user (store both legacy id and member_id strings)
   final Set<String> _blockedIds = <String>{};
 
@@ -322,7 +334,7 @@ class MockApi {
       'name': 'Michael Chen',
       'avatar': 'https://randomuser.me/api/portraits/men/32.jpg',
       'lastMessage': 'Wah, kebetulan! Saya juga di sini.',
-      'lastMessageTime': '2023-11-15 10:40:00',
+      'lastMessageTime': '2023-11-15T10:40:00',
       'unreadCount': 0,
       'isOnline': true,
     },
@@ -331,7 +343,7 @@ class MockApi {
       'name': 'Jessica Lee',
       'avatar': 'https://randomuser.me/api/portraits/women/28.jpg',
       'lastMessage': 'Mau ketemu besok?',
-      'lastMessageTime': '2023-11-14 18:30:00',
+      'lastMessageTime': '2023-11-14T18:30:00',
       'unreadCount': 2,
       'isOnline': true,
     },
@@ -339,8 +351,8 @@ class MockApi {
       'id': '3',
       'name': 'David Wilson',
       'avatar': 'https://randomuser.me/api/portraits/men/36.jpg',
-      'lastMessage': 'Oke, see you there!',
-      'lastMessageTime': '2023-11-13 15:45:00',
+      'lastMessage': null,
+      'lastMessageTime': null,
       'unreadCount': 0,
       'isOnline': false,
     },
@@ -348,17 +360,17 @@ class MockApi {
       'id': '4',
       'name': 'Emma Thompson',
       'avatar': 'https://randomuser.me/api/portraits/women/65.jpg',
-      'lastMessage': 'Thanks for the recommendation!',
-      'lastMessageTime': '2023-11-12 09:20:00',
-      'unreadCount': 1,
+      'lastMessage': null,
+      'lastMessageTime': null,
+      'unreadCount': 0,
       'isOnline': false,
     },
     {
       'id': '5',
       'name': 'Robert Garcia',
       'avatar': 'https://randomuser.me/api/portraits/men/67.jpg',
-      'lastMessage': 'Are you coming to the event?',
-      'lastMessageTime': '2023-11-11 20:15:00',
+      'lastMessage': null,
+      'lastMessageTime': null,
       'unreadCount': 0,
       'isOnline': true,
     },
@@ -385,6 +397,17 @@ class MockApi {
         'showTime': true,
         'isImage': false,
       },
+    ],
+    '2': [
+      {
+        'id': 'm3',
+        'text': 'Mau ketemu besok?',
+        'isSentByMe': false,
+        'time': '06:30 PM',
+        'showDate': true,
+        'showTime': true,
+        'isImage': false,
+      }
     ],
   };
 
@@ -451,6 +474,13 @@ class MockApi {
   // --- GET endpoints ---
   Future<Map<String, dynamic>> getCurrentUser() async {
     await Future.delayed(const Duration(milliseconds: 200));
+    // Initialize member presences on first call (set last_heartbeat_at to now)
+    for (final entry in _memberPresence.entries) {
+      if (entry.value['last_heartbeat_at'] == 'INIT') {
+        entry.value['last_heartbeat_at'] = DateTime.now().toIso8601String();
+        entry.value['check_in_time'] = DateTime.now().toIso8601String();
+      }
+    }
     return Map<String, dynamic>.from(currentUser);
   }
 
@@ -507,6 +537,26 @@ class MockApi {
       final id = m['id'].toString();
       final mid = (m['member_id'] ?? '').toString();
       return !_blockedIds.contains(id) && !_blockedIds.contains(mid);
+    }).toList();
+
+    // Compute online via TTL presence; if online, override location_id
+    list = list.map((m) {
+      final id = m['id'].toString();
+      final updated = {...m};
+      final pres = _memberPresence[id];
+      if (pres != null) {
+        final last = DateTime.tryParse(pres['last_heartbeat_at'] ?? '');
+        final online =
+            last != null &&
+            DateTime.now().difference(last).inSeconds <= presenceTtlSeconds;
+        updated['isOnline'] = online;
+        if (online) {
+          updated['location_id'] = pres['location_id'];
+        }
+      } else {
+        updated['isOnline'] = false;
+      }
+      return updated;
     }).toList();
 
     // Tab: nearest -> base on presence location or currentUser.location_id
@@ -572,11 +622,26 @@ class MockApi {
   Future<Map<String, dynamic>?> getMemberById(String userId) async {
     await Future.delayed(const Duration(milliseconds: 250));
     try {
-      return _members.firstWhere(
+      final raw = _members.firstWhere(
         (e) =>
             e['id'].toString() == userId ||
             e['member_id']?.toString() == userId,
       );
+      final m = Map<String, dynamic>.from(raw);
+      final id = m['id'].toString();
+      final pres = _memberPresence[id];
+      bool online = false;
+      if (pres != null) {
+        final last = DateTime.tryParse(pres['last_heartbeat_at'] ?? '');
+        online =
+            last != null &&
+            DateTime.now().difference(last).inSeconds <= presenceTtlSeconds;
+      }
+      m['isOnline'] = online;
+      if (online && pres != null) {
+        m['location_id'] = pres['location_id'];
+      }
+      return m;
     } catch (_) {
       return null;
     }
@@ -584,7 +649,47 @@ class MockApi {
 
   Future<List<Map<String, dynamic>>> getChatList({String? search}) async {
     await Future.delayed(const Duration(milliseconds: 250));
+    // Ensure a chat entry exists for all connected members (even with zero messages)
+    for (final m in _members) {
+      if ((m['isConnected'] as bool?) == true) {
+        final id = m['id'].toString();
+        final exists = _chatList.any((c) => c['id'].toString() == id);
+        if (!exists) {
+          _chatList.add({
+            'id': id,
+            'name': m['name'] ?? (m['full_name'] ?? ''),
+            'avatar': m['avatar'] ?? m['profile_image_url'] ?? '',
+            'lastMessage': '',
+            'lastMessageTime': DateTime.now().toIso8601String(),
+            'unreadCount': 0,
+            'isOnline': (m['isOnline'] as bool?) == true,
+          });
+          _chatMessages.putIfAbsent(id, () => []);
+        }
+      }
+    }
+
     var list = List<Map<String, dynamic>>.from(_chatList);
+    // Recompute online from TTL presence
+    list = list.map((c) {
+      final id = c['id'].toString();
+      final pres = _memberPresence[id];
+      bool online = false;
+      if (pres != null) {
+        final last = DateTime.tryParse(pres['last_heartbeat_at'] ?? '');
+        online =
+            last != null &&
+            DateTime.now().difference(last).inSeconds <= presenceTtlSeconds;
+      }
+      // Align lastMessage with room state: if no messages in room, blank preview
+      final msgs = _chatMessages[id] ?? const [];
+      final adjusted = {...c, 'isOnline': online};
+      if (msgs.isEmpty) {
+        adjusted['lastMessage'] = '';
+      }
+      return adjusted;
+    }).toList();
+    // Keep chats even without messages so all connections appear
     // Filter blocked: assume chat.id == member.id in mock
     list = list
         .where((e) => !_blockedIds.contains(e['id'].toString()))
@@ -831,13 +936,35 @@ class MockApi {
     );
     final idx = _notifications.indexWhere((n) => n['id'] == notificationId);
     if (idx != -1) {
+      final notif = _notifications[idx];
+      final senderId = notif['senderId']?.toString();
       _notifications[idx] = {
-        ..._notifications[idx],
+        ...notif,
         'isRead': true,
         'requiresAction': false,
         'type': 'connectionAccepted',
         'title': 'Koneksi Diterima',
       };
+      if (senderId != null) {
+        final midx = _members.indexWhere((m) => m['id'].toString() == senderId);
+        if (midx != -1) {
+          _members[midx] = {..._members[midx], 'isConnected': true};
+          final exists = _chatList.any((c) => c['id'].toString() == senderId);
+          if (!exists) {
+            final m = _members[midx];
+            _chatList.add({
+              'id': senderId,
+              'name': m['name'] ?? (m['full_name'] ?? ''),
+              'avatar': m['avatar'] ?? m['profile_image_url'] ?? '',
+              'lastMessage': null,
+              'lastMessageTime': null,
+              'unreadCount': 0,
+              'isOnline': (m['isOnline'] as bool?) == true,
+            });
+            _chatMessages.putIfAbsent(senderId, () => []);
+          }
+        }
+      }
     }
   }
 
@@ -848,13 +975,29 @@ class MockApi {
     );
     final idx = _notifications.indexWhere((n) => n['id'] == notificationId);
     if (idx != -1) {
+      final notif = _notifications[idx];
+      final senderId = notif['senderId']?.toString();
       _notifications[idx] = {
-        ..._notifications[idx],
+        ...notif,
         'isRead': true,
         'requiresAction': false,
         'type': 'connectionRejected',
         'title': 'Koneksi Ditolak',
       };
+      if (senderId != null) {
+        final midx = _members.indexWhere((m) => m['id'].toString() == senderId);
+        if (midx != -1) {
+          _members[midx] = {..._members[midx], 'isConnected': false};
+        }
+        final cidx = _chatList.indexWhere((c) => c['id'].toString() == senderId);
+        if (cidx != -1) {
+          final msgs = _chatMessages[senderId] ?? const [];
+          if (msgs.isEmpty) {
+            _chatList.removeAt(cidx);
+            _chatMessages.remove(senderId);
+          }
+        }
+      }
     }
   }
 }

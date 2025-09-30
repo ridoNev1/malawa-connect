@@ -29,6 +29,7 @@ This document lists all features currently implemented in the app, how they fetc
 - Blocked filtering: members excluded if blocked via profile action.
 - Reset on navigation: provider `autoDispose` ensures fresh state after you leave and return.
 - Nearest filter: if presence active, uses `presence.location_id`; otherwise uses `currentUser.location_id`.
+ - Online semantics: in mock, isOnline is computed from presence heartbeat TTL (120s) for members.
 
 **Profile**
 - Current user: `profileProvider.loadUserData()` consumes `MockApi.getCurrentUser()`.
@@ -46,10 +47,13 @@ This document lists all features currently implemented in the app, how they fetc
 - Chat list: `chatListProvider.loadChatRooms()` → `MockApi.getChatList()`.
 - Room header: tappable; opens the profile of the other user (`/profile/view/:id`).
 - Messages: `chatRoomProviderFamily(chatRoom).loadMessages()` → `MockApi.getChatMessages(chatId)`.
+- Messages pagination: page size 50; loads latest 50 on open, loads older on scroll-to-top.
 - Send text/image: `MockApi.sendMessage(chatId, text, isImage)`; list lastMessage updates; unread counts handled.
 - Pagination: on scroll-to-top, prepends older mock messages a few times.
 - Mark read: `chatListProvider.markAsRead(chatId)` → `MockApi.markChatAsRead`.
 - Blocked users: chat list hides blocked; message button from profile disabled for blocked targets.
+- Header status line: shows “Online di <location>” when member presence active (within TTL), otherwise “Out of Coffee”.
+- All connections visible: chat list includes all accepted connections even if a chat has 0 messages; preview shows a friendly “Belum ada percakapan”, and the room renders an empty state until the first message.
 
 **Notifications**
 - Page uses `notificationsProvider` and MockApi for list + actions.
@@ -64,6 +68,7 @@ This document lists all features currently implemented in the app, how they fetc
 - Locations have `lat`, `lng`, `geofence_radius_m` for auto check-in/out.
 - Presence object includes `check_in_time` and `last_heartbeat_at`.
 - Base location for nearest filter: `presence.location_id` if active else `currentUser.location_id`.
+ - Online definition: active presence with recent `last_heartbeat_at` (TTL = 120s in mock).
 
 **Blocking**
 - `MockApi.blockUser({userId})` adds both legacy `id` and `member_id` to an in-memory blocklist.

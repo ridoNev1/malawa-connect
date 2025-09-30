@@ -22,7 +22,7 @@ class ChatRoomState {
     this.isSending = false,
     this.showEmojiPicker = false,
     this.page = 1,
-    this.pageSize = 20,
+    this.pageSize = 50,
     this.isLoadingMore = false,
     this.hasMore = true,
   });

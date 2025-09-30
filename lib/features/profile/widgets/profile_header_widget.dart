@@ -191,7 +191,7 @@ class ProfileHeaderWidget extends ConsumerWidget {
                     final online = presence != null;
                     final label = online
                         ? 'Online di ${presence['location_name'] ?? '-'}'
-                        : 'Offline';
+                        : 'Terakhir mengunjungi cafe';
                     return _OnlineBadge(online: online, label: label);
                   },
                   loading: () => const SizedBox.shrink(),
@@ -200,15 +200,32 @@ class ProfileHeaderWidget extends ConsumerWidget {
           })
         else if (userId != null)
           Consumer(builder: (context, ref, _) {
-            return ref.watch(memberByIdProvider(userId!)).when(
-                  data: (m) {
-                    final online = (m?['isOnline'] as bool?) == true;
-                    final label = online ? 'Online' : 'Terakhir terlihat: ${m?['lastSeen'] ?? '-'}';
-                    return _OnlineBadge(online: online, label: label);
-                  },
-                  loading: () => const SizedBox.shrink(),
-                  error: (e, st) => const SizedBox.shrink(),
-                );
+            final memberAsync = ref.watch(memberByIdProvider(userId!));
+            final locsAsync = ref.watch(profileLocationsProvider);
+            return memberAsync.when(
+              data: (m) {
+                final online = (m?['isOnline'] as bool?) == true;
+                String label;
+                if (online) {
+                  String locName = '-';
+                  final locId = m?['location_id'] as int?;
+                  if (locsAsync.hasValue) {
+                    final locs = locsAsync.value!;
+                    final found = locs.firstWhere(
+                      (e) => e['id'] == locId,
+                      orElse: () => {},
+                    );
+                    if (found.isNotEmpty) locName = (found['name'] ?? '-').toString();
+                  }
+                  label = 'Online di $locName';
+                } else {
+                  label = 'Terakhir mengunjungi cafe ${m?['lastSeen'] ?? '-'}';
+                }
+                return _OnlineBadge(online: online, label: label);
+              },
+              loading: () => const SizedBox.shrink(),
+              error: (e, st) => const SizedBox.shrink(),
+            );
           })
         else
           const SizedBox.shrink(),
@@ -361,7 +378,7 @@ class ProfileHeaderWidget extends ConsumerWidget {
     // Ensure a chat exists with this user, then navigate
     final chat = await MockApi.instance.getOrCreateDirectChatByUserId(userId);
     if (context.mounted) {
-      context.go('/chat/room/${chat['id']}');
+      context.push('/chat/room/${chat['id']}');
     }
   }
 }
@@ -393,6 +410,11 @@ class _OnlineBadge extends StatelessWidget {
     );
   }
 }
+
+final profileLocationsProvider =
+    FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  return await MockApi.instance.getLocations();
+});
 
 // Full screen profile image page
 class FullScreenProfileImagePage extends StatelessWidget {

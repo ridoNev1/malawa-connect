@@ -12,6 +12,7 @@ import '../providers/home_providers.dart';
 import '../providers/geofence_watcher.dart';
 import '../../notifications/providers/notification_permission_provider.dart';
 import '../../notifications/providers/notifications_provider.dart';
+import '../../../core/services/notification_permission_service.dart';
 
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
@@ -73,6 +74,48 @@ class HomePage extends ConsumerWidget {
                       ? (currentUser['full_name']?.toString() ?? 'Member')
                       : null,
                 ),
+                // Show banner if notification permission not granted
+                ref.watch(notificationPermissionProvider).maybeWhen(
+                      data: (granted) => granted
+                          ? const SizedBox.shrink()
+                          : Padding(
+                              padding: const EdgeInsets.only(top: 12.0),
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                      color: Colors.amber.withOpacity(0.4)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.notifications_off,
+                                        color: Colors.amber),
+                                    const SizedBox(width: 8),
+                                    const Expanded(
+                                      child: Text(
+                                        'Aktifkan izin notifikasi untuk menerima pemberitahuan.',
+                                        style: TextStyle(fontSize: 12),
+                                      ),
+                                    ),
+                                    TextButton(
+                                      onPressed: () async {
+                                        final ok = await NotificationPermissionService
+                                            .ensureRequestedOnce();
+                                        if (!ok) {
+                                          await NotificationPermissionService
+                                              .openSettings();
+                                        }
+                                      },
+                                      child: const Text('AKTIFKAN'),
+                                    )
+                                  ],
+                                ),
+                              ),
+                            ),
+                      orElse: () => const SizedBox.shrink(),
+                    ),
                 const SizedBox(height: 24),
                 ref
                     .watch(membershipSummaryProvider)

@@ -177,7 +177,7 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
                           Text(
                             _searchController.text.isNotEmpty
                                 ? 'Tidak ada hasil pencarian'
-                                : 'Tidak ada percakapan',
+                                : 'Belum ada percakapan',
                             style: TextStyle(
                               fontSize: 16,
                               color: Colors.grey[500],
@@ -341,7 +341,7 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
                         ),
                       ),
                       Text(
-                        _formatTime(chat['lastMessageTime']),
+                        _formatTime((chat['lastMessageTime'] as String?) ?? ''),
                         style: TextStyle(
                           fontSize: 12,
                           color: isUnread ? MC.accentOrange : Colors.grey[500],
@@ -358,7 +358,9 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
                     children: [
                       Expanded(
                         child: Text(
-                          chat['lastMessage'],
+                          (chat['lastMessage'] as String?)?.trim().isNotEmpty == true
+                              ? chat['lastMessage']
+                              : 'Belum ada percakapan',
                           style: TextStyle(
                             fontSize: 14,
                             color: isUnread ? Colors.black87 : Colors.grey[600],

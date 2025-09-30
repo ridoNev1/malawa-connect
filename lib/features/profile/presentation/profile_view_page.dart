@@ -92,14 +92,14 @@ class _ProfileViewPageState extends ConsumerState<ProfileViewPage> {
             onPressed: () async {
               if (MockApi.instance.isBlocked(widget.userId)) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Tidak bisa mengirim pesan ke user yang diblokir')), 
+                  const SnackBar(content: Text('Tidak bisa mengirim pesan ke user yang diblokir')),
                 );
                 return;
               }
               final chat = await MockApi.instance
                   .getOrCreateDirectChatByUserId(widget.userId);
               if (!mounted) return;
-              context.go('/chat/room/${chat['id']}');
+              context.push('/chat/room/${chat['id']}');
             },
             icon: const Icon(Icons.message, color: MC.darkBrown),
           ),
