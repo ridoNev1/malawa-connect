@@ -403,6 +403,131 @@ $$;
 
 ALTER FUNCTION "public"."assign_staff_to_locations_v2"("p_staff_id" "uuid", "p_location_ids" bigint[]) OWNER TO "postgres";
 
+SET default_tablespace = '';
+
+SET default_table_access_method = "heap";
+
+
+CREATE TABLE IF NOT EXISTS "public"."customers" (
+    "id" bigint NOT NULL,
+    "full_name" "text" NOT NULL,
+    "phone_number" "text",
+    "visit_count" integer DEFAULT 1 NOT NULL,
+    "last_visit_at" timestamp with time zone DEFAULT "now"(),
+    "notes" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "total_point" integer DEFAULT 0 NOT NULL,
+    "organization_id" bigint NOT NULL,
+    "member_id" "uuid",
+    "location_id" bigint,
+    "preference" "text",
+    "interests" "text"[],
+    "gallery_images" "text"[],
+    "profile_image_url" "text",
+    "date_of_birth" "date",
+    "gender" "text",
+    "visibility" boolean DEFAULT true,
+    "search_radius_km" numeric DEFAULT 3,
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."customers" OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."auth_upsert_customer_by_phone"("p_phone" "text", "p_member_id" "uuid" DEFAULT NULL::"uuid", "p_full_name" "text" DEFAULT NULL::"text", "p_location_id" bigint DEFAULT NULL::bigint, "p_preference" "text" DEFAULT NULL::"text", "p_interests" "text"[] DEFAULT NULL::"text"[], "p_gallery_images" "text"[] DEFAULT NULL::"text"[], "p_profile_image_url" "text" DEFAULT NULL::"text", "p_date_of_birth" "date" DEFAULT NULL::"date", "p_gender" "text" DEFAULT NULL::"text", "p_visibility" boolean DEFAULT NULL::boolean, "p_search_radius_km" numeric DEFAULT NULL::numeric, "p_notes" "text" DEFAULT NULL::"text") RETURNS "public"."customers"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_customer public.customers%ROWTYPE;
+  v_org_id bigint := public.get_current_organization_id();
+BEGIN
+  IF p_phone IS NULL OR btrim(p_phone) = '' THEN
+    RAISE EXCEPTION 'Phone number is required';
+  END IF;
+
+  IF v_org_id IS NULL THEN
+    RAISE EXCEPTION 'Active organization context is required';
+  END IF;
+
+  SELECT *
+    INTO v_customer
+  FROM public.customers
+  WHERE phone_number = p_phone
+  FOR UPDATE;
+
+  IF FOUND THEN
+    IF v_customer.organization_id <> v_org_id THEN
+      RAISE EXCEPTION 'Phone number is already linked to another organization';
+    END IF;
+
+    IF v_customer.member_id IS NOT NULL
+       AND p_member_id IS NOT NULL
+       AND v_customer.member_id <> p_member_id THEN
+      RAISE EXCEPTION 'Phone number is already linked to a different member_id';
+    END IF;
+
+    UPDATE public.customers
+       SET member_id        = COALESCE(p_member_id, v_customer.member_id),
+           full_name        = COALESCE(p_full_name, v_customer.full_name),
+           location_id      = COALESCE(p_location_id, v_customer.location_id),
+           preference       = COALESCE(p_preference, v_customer.preference),
+           interests        = COALESCE(p_interests, v_customer.interests),
+           gallery_images   = COALESCE(p_gallery_images, v_customer.gallery_images),
+           profile_image_url= COALESCE(p_profile_image_url, v_customer.profile_image_url),
+           date_of_birth    = COALESCE(p_date_of_birth, v_customer.date_of_birth),
+           gender           = COALESCE(p_gender, v_customer.gender),
+           visibility       = COALESCE(p_visibility, v_customer.visibility),
+           search_radius_km = COALESCE(p_search_radius_km, v_customer.search_radius_km),
+           notes            = COALESCE(p_notes, v_customer.notes),
+           last_visit_at    = COALESCE(v_customer.last_visit_at, now()),
+           updated_at       = now()
+     WHERE id = v_customer.id
+     RETURNING * INTO v_customer;
+  ELSE
+    INSERT INTO public.customers (
+      full_name,
+      phone_number,
+      organization_id,
+      member_id,
+      location_id,
+      preference,
+      interests,
+      gallery_images,
+      profile_image_url,
+      date_of_birth,
+      gender,
+      visibility,
+      search_radius_km,
+      notes
+    )
+    VALUES (
+      COALESCE(p_full_name, p_phone, 'Member'),
+      p_phone,
+      v_org_id,
+      p_member_id,
+      p_location_id,
+      p_preference,
+      p_interests,
+      p_gallery_images,
+      p_profile_image_url,
+      p_date_of_birth,
+      p_gender,
+      COALESCE(p_visibility, true),
+      COALESCE(p_search_radius_km, 3),
+      p_notes
+    )
+    RETURNING * INTO v_customer;
+  END IF;
+
+  RETURN v_customer;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."auth_upsert_customer_by_phone"("p_phone" "text", "p_member_id" "uuid", "p_full_name" "text", "p_location_id" bigint, "p_preference" "text", "p_interests" "text"[], "p_gallery_images" "text"[], "p_profile_image_url" "text", "p_date_of_birth" "date", "p_gender" "text", "p_visibility" boolean, "p_search_radius_km" numeric, "p_notes" "text") OWNER TO "postgres";
+
 
 CREATE OR REPLACE FUNCTION "public"."calculate_hpp"("p_product_id" bigint) RETURNS numeric
     LANGUAGE "plpgsql"
@@ -1387,6 +1512,20 @@ $$;
 
 
 ALTER FUNCTION "public"."get_current_role"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_customer_detail_by_member_id"("p_member_id" "uuid") RETURNS "public"."customers"
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  SELECT c.*
+  FROM public.customers c
+  WHERE c.member_id = p_member_id
+    AND c.organization_id = public.get_current_organization_id();
+$$;
+
+
+ALTER FUNCTION "public"."get_customer_detail_by_member_id"("p_member_id" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."get_daily_sales_revenue"("days_limit" integer) RETURNS TABLE("sale_date" "date", "revenue" numeric)
@@ -3146,6 +3285,19 @@ END $$;
 ALTER FUNCTION "public"."request_stock_transfer_v2"("p_from_location_id" bigint, "p_to_location_id" bigint, "p_items" "jsonb") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."set_customers_updated_at"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."set_customers_updated_at"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."set_main_warehouse_v1"("p_location_id" bigint) RETURNS bigint
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -3512,10 +3664,6 @@ $_$;
 
 ALTER FUNCTION "public"."upsert_setting_for_active_org"("p_key" "text", "p_value" "text") OWNER TO "postgres";
 
-SET default_tablespace = '';
-
-SET default_table_access_method = "heap";
-
 
 CREATE TABLE IF NOT EXISTS "public"."cashier_sessions" (
     "id" bigint NOT NULL,
@@ -3565,22 +3713,6 @@ ALTER TABLE "public"."categories" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS 
     CACHE 1
 );
 
-
-
-CREATE TABLE IF NOT EXISTS "public"."customers" (
-    "id" bigint NOT NULL,
-    "full_name" "text" NOT NULL,
-    "phone_number" "text",
-    "visit_count" integer DEFAULT 1 NOT NULL,
-    "last_visit_at" timestamp with time zone DEFAULT "now"(),
-    "notes" "text",
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "total_point" integer DEFAULT 0 NOT NULL,
-    "organization_id" bigint NOT NULL
-);
-
-
-ALTER TABLE "public"."customers" OWNER TO "postgres";
 
 
 ALTER TABLE "public"."customers" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
@@ -4250,6 +4382,10 @@ ALTER TABLE ONLY "public"."stock_transfers"
 
 
 
+CREATE UNIQUE INDEX "idx_customers_member_id_unique" ON "public"."customers" USING "btree" ("member_id") WHERE ("member_id" IS NOT NULL);
+
+
+
 CREATE INDEX "idx_customers_org_created_at" ON "public"."customers" USING "btree" ("organization_id", "created_at" DESC);
 
 
@@ -4298,6 +4434,10 @@ CREATE UNIQUE INDEX "ux_locations_one_main_per_org" ON "public"."locations" USIN
 
 
 
+CREATE OR REPLACE TRIGGER "set_customers_updated_at" BEFORE UPDATE ON "public"."customers" FOR EACH ROW EXECUTE FUNCTION "public"."set_customers_updated_at"();
+
+
+
 ALTER TABLE ONLY "public"."cashier_sessions"
     ADD CONSTRAINT "cashier_sessions_location_id_fkey" FOREIGN KEY ("location_id") REFERENCES "public"."locations"("id");
 
@@ -4310,6 +4450,11 @@ ALTER TABLE ONLY "public"."cashier_sessions"
 
 ALTER TABLE ONLY "public"."categories"
     ADD CONSTRAINT "categories_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."customers"
+    ADD CONSTRAINT "customers_location_id_fkey" FOREIGN KEY ("location_id") REFERENCES "public"."locations"("id") ON DELETE SET NULL;
 
 
 
@@ -5081,6 +5226,18 @@ GRANT ALL ON FUNCTION "public"."assign_staff_to_locations_v2"("p_staff_id" "uuid
 
 
 
+GRANT ALL ON TABLE "public"."customers" TO "anon";
+GRANT ALL ON TABLE "public"."customers" TO "authenticated";
+GRANT ALL ON TABLE "public"."customers" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."auth_upsert_customer_by_phone"("p_phone" "text", "p_member_id" "uuid", "p_full_name" "text", "p_location_id" bigint, "p_preference" "text", "p_interests" "text"[], "p_gallery_images" "text"[], "p_profile_image_url" "text", "p_date_of_birth" "date", "p_gender" "text", "p_visibility" boolean, "p_search_radius_km" numeric, "p_notes" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."auth_upsert_customer_by_phone"("p_phone" "text", "p_member_id" "uuid", "p_full_name" "text", "p_location_id" bigint, "p_preference" "text", "p_interests" "text"[], "p_gallery_images" "text"[], "p_profile_image_url" "text", "p_date_of_birth" "date", "p_gender" "text", "p_visibility" boolean, "p_search_radius_km" numeric, "p_notes" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."auth_upsert_customer_by_phone"("p_phone" "text", "p_member_id" "uuid", "p_full_name" "text", "p_location_id" bigint, "p_preference" "text", "p_interests" "text"[], "p_gallery_images" "text"[], "p_profile_image_url" "text", "p_date_of_birth" "date", "p_gender" "text", "p_visibility" boolean, "p_search_radius_km" numeric, "p_notes" "text") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."calculate_hpp"("p_product_id" bigint) TO "anon";
 GRANT ALL ON FUNCTION "public"."calculate_hpp"("p_product_id" bigint) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."calculate_hpp"("p_product_id" bigint) TO "service_role";
@@ -5210,6 +5367,12 @@ GRANT ALL ON FUNCTION "public"."get_current_organization_id"() TO "service_role"
 GRANT ALL ON FUNCTION "public"."get_current_role"() TO "anon";
 GRANT ALL ON FUNCTION "public"."get_current_role"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_current_role"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."get_customer_detail_by_member_id"("p_member_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."get_customer_detail_by_member_id"("p_member_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_customer_detail_by_member_id"("p_member_id" "uuid") TO "service_role";
 
 
 
@@ -5370,6 +5533,12 @@ GRANT ALL ON FUNCTION "public"."request_stock_transfer_v2"("p_from_location_id" 
 
 
 
+GRANT ALL ON FUNCTION "public"."set_customers_updated_at"() TO "anon";
+GRANT ALL ON FUNCTION "public"."set_customers_updated_at"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."set_customers_updated_at"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."set_main_warehouse_v1"("p_location_id" bigint) TO "anon";
 GRANT ALL ON FUNCTION "public"."set_main_warehouse_v1"("p_location_id" bigint) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."set_main_warehouse_v1"("p_location_id" bigint) TO "service_role";
@@ -5453,12 +5622,6 @@ GRANT ALL ON TABLE "public"."categories" TO "service_role";
 GRANT ALL ON SEQUENCE "public"."categories_id_seq" TO "anon";
 GRANT ALL ON SEQUENCE "public"."categories_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."categories_id_seq" TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."customers" TO "anon";
-GRANT ALL ON TABLE "public"."customers" TO "authenticated";
-GRANT ALL ON TABLE "public"."customers" TO "service_role";
 
 
 
