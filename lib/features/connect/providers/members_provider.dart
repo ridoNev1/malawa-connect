@@ -105,7 +105,21 @@ class MembersNotifier extends Notifier<MembersState> {
       page: 1,
       pageSize: state.query.pageSize,
     );
-    final items = List<Map<String, dynamic>>.from(result['items'] ?? const []);
+    // Deduplicate items by member_id (fallback to id) to mitigate any BE duplicates
+    final raw = List<Map<String, dynamic>>.from(result['items'] ?? const []);
+    final seen = <String>{};
+    final items = <Map<String, dynamic>>[];
+    for (final m in raw) {
+      final key = (m['member_id'] ?? m['id'] ?? '').toString();
+      if (key.isEmpty) {
+        items.add(m);
+        continue;
+      }
+      if (!seen.contains(key)) {
+        seen.add(key);
+        items.add(m);
+      }
+    }
     final stats = _computeStats(items, state.query);
     state = state.copyWith(
       members: items,
@@ -128,7 +142,19 @@ class MembersNotifier extends Notifier<MembersState> {
       page: nextQuery.page,
       pageSize: nextQuery.pageSize,
     );
-    final items = List<Map<String, dynamic>>.from(result['items'] ?? const []);
+    // Deduplicate in load more as well
+    final incoming = List<Map<String, dynamic>>.from(result['items'] ?? const []);
+    final seen = <String>{}..addAll(
+        state.members.map((m) => (m['member_id'] ?? m['id'] ?? '').toString()),
+      );
+    final items = <Map<String, dynamic>>[];
+    for (final m in incoming) {
+      final key = (m['member_id'] ?? m['id'] ?? '').toString();
+      if (key.isEmpty || !seen.contains(key)) {
+        seen.add(key);
+        items.add(m);
+      }
+    }
     final stats = _computeStats([...state.members, ...items], nextQuery);
     state = state.copyWith(
       members: [...state.members, ...items],

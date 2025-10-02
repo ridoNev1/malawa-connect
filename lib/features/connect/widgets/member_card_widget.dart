@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/theme.dart';
 import '../providers/members_provider.dart';
 import '../../../core/services/supabase_api.dart';
+import '../providers/inapp_presence_provider.dart';
 
 class MemberCardWidget extends ConsumerWidget {
   final Map<String, dynamic> member;
@@ -54,7 +55,7 @@ class MemberCardWidget extends ConsumerWidget {
           children: [
             Row(
               children: [
-                // Avatar with online indicator and tap to enlarge
+                // Avatar with in-app indicator and tap to enlarge
                 GestureDetector(
                   onTap: () {
                     _showFullScreenImage(context, member['avatar']);
@@ -63,41 +64,63 @@ class MemberCardWidget extends ConsumerWidget {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(50),
-                        child: Image.network(
-                          member['avatar'],
-                          width: 70,
-                          height: 70,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
+                        child: (() {
+                          final String url = (member['avatar'] ?? '')
+                              .toString();
+                          final bool valid =
+                              url.isNotEmpty &&
+                              (url.startsWith('http://') ||
+                                  url.startsWith('https://'));
+                          if (valid) {
+                            return Image.network(
+                              url,
                               width: 70,
                               height: 70,
-                              color: MC.darkBrown.withValues(alpha: 0.1),
-                              child: const Icon(
-                                Icons.person,
-                                size: 35,
-                                color: MC.darkBrown,
-                              ),
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  width: 70,
+                                  height: 70,
+                                  color: MC.darkBrown.withValues(alpha: 0.1),
+                                  child: const Icon(
+                                    Icons.person,
+                                    size: 35,
+                                    color: MC.darkBrown,
+                                  ),
+                                );
+                              },
                             );
-                          },
-                        ),
+                          }
+                          return Container(
+                            width: 70,
+                            height: 70,
+                            color: MC.darkBrown.withValues(alpha: 0.1),
+                            child: const Icon(
+                              Icons.person,
+                              size: 35,
+                              color: MC.darkBrown,
+                            ),
+                          );
+                        })(),
                       ),
-                      // Online indicator
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          width: 20,
-                          height: 20,
-                          decoration: BoxDecoration(
-                            color: member['isOnline'] as bool
-                                ? Colors.green
-                                : Colors.grey,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 3),
+                      // In-app indicator attached to avatar only
+                      Consumer(builder: (context, ref, _) {
+                        final u = (member['member_id'] ?? '').toString();
+                        final inApp = ref.watch(inAppPresenceProvider).activeUids.contains(u);
+                        return Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: Container(
+                            width: 20,
+                            height: 20,
+                            decoration: BoxDecoration(
+                              color: inApp ? Colors.green : Colors.grey,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 3),
+                            ),
                           ),
-                        ),
-                      ),
+                        );
+                      }),
                     ],
                   ),
                 ),
@@ -157,11 +180,26 @@ class MemberCardWidget extends ConsumerWidget {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      // Age & Gender
+                      // Age & Gender (better icon mapping)
                       if (member['age'] != null || member['gender'] != null)
                         Row(
                           children: [
-                            Icon(Icons.cake, size: 14, color: Colors.grey[500]),
+                            Builder(builder: (context) {
+                              final g = (member['gender'] ?? '').toString().toLowerCase();
+                              IconData icon;
+                              Color color;
+                              if (g.contains('laki') || g == 'male' || g == 'm') {
+                                icon = Icons.male_rounded;
+                                color = Colors.blueAccent;
+                              } else if (g.contains('perempuan') || g == 'female' || g == 'f') {
+                                icon = Icons.female_rounded;
+                                color = Colors.pinkAccent;
+                              } else {
+                                icon = Icons.person_outline;
+                                color = Colors.grey[500]!;
+                              }
+                              return Icon(icon, size: 14, color: color);
+                            }),
                             const SizedBox(width: 4),
                             Text(
                               member['age'] != null
@@ -172,21 +210,11 @@ class MemberCardWidget extends ConsumerWidget {
                                 color: Colors.grey[500],
                               ),
                             ),
-                            if (member['age'] != null &&
-                                member['gender'] != null)
-                              const Text(
-                                ' • ',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey,
-                                ),
-                              ),
+                            if (member['age'] != null && member['gender'] != null)
+                              const Text(' • ', style: TextStyle(fontSize: 12, color: Colors.grey)),
                             Text(
-                              member['gender'] ?? '',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[500],
-                              ),
+                              (member['gender'] ?? '').toString(),
+                              style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                             ),
                           ],
                         ),
@@ -380,22 +408,40 @@ class _FullScreenImagePageState extends State<FullScreenImagePage> {
                 panEnabled: true,
                 minScale: 0.5,
                 maxScale: 4,
-                child: Image.network(
-                  widget.imageUrl,
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      width: double.infinity,
-                      height: double.infinity,
-                      color: MC.darkBrown.withValues(alpha: 0.1),
-                      child: const Icon(
-                        Icons.person,
-                        size: 100,
-                        color: MC.darkBrown,
-                      ),
+                child: (() {
+                  final String url = widget.imageUrl.trim();
+                  final bool valid =
+                      url.isNotEmpty &&
+                      (url.startsWith('http://') || url.startsWith('https://'));
+                  if (valid) {
+                    return Image.network(
+                      url,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          width: double.infinity,
+                          height: double.infinity,
+                          color: MC.darkBrown.withValues(alpha: 0.1),
+                          child: const Icon(
+                            Icons.person,
+                            size: 100,
+                            color: MC.darkBrown,
+                          ),
+                        );
+                      },
                     );
-                  },
-                ),
+                  }
+                  return Container(
+                    width: double.infinity,
+                    height: double.infinity,
+                    color: MC.darkBrown.withValues(alpha: 0.1),
+                    child: const Icon(
+                      Icons.person,
+                      size: 100,
+                      color: MC.darkBrown,
+                    ),
+                  );
+                })(),
               ),
             ),
           ),

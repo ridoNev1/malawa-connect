@@ -119,24 +119,40 @@ class GalleryWidget extends ConsumerWidget {
                                     );
                                   },
                                 )
-                              : Image.network(
-                                  galleryImages[index],
-                                  fit: BoxFit.cover,
-                                  width: double.infinity,
-                                  height: double.infinity,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return Container(
-                                      color: MC.darkBrown.withValues(
-                                        alpha: 0.1,
-                                      ),
-                                      child: const Icon(
-                                        Icons.broken_image,
-                                        size: 40,
-                                        color: MC.darkBrown,
-                                      ),
+                              : (() {
+                                  final String url = galleryImages[index];
+                                  final bool valid = url.isNotEmpty &&
+                                      (url.startsWith('http://') ||
+                                          url.startsWith('https://'));
+                                  if (valid) {
+                                    return Image.network(
+                                      url,
+                                      fit: BoxFit.cover,
+                                      width: double.infinity,
+                                      height: double.infinity,
+                                      errorBuilder: (context, error, stackTrace) {
+                                        return Container(
+                                          color: MC.darkBrown.withValues(
+                                            alpha: 0.1,
+                                          ),
+                                          child: const Icon(
+                                            Icons.broken_image,
+                                            size: 40,
+                                            color: MC.darkBrown,
+                                          ),
+                                        );
+                                      },
                                     );
-                                  },
-                                ),
+                                  }
+                                  return Container(
+                                    color: MC.darkBrown.withValues(alpha: 0.1),
+                                    child: const Icon(
+                                      Icons.broken_image,
+                                      size: 40,
+                                      color: MC.darkBrown,
+                                    ),
+                                  );
+                                })(),
                         ),
                       ),
                       Positioned(

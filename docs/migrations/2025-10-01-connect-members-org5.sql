@@ -101,12 +101,29 @@ BEGIN
       )
   ),
   pres AS (
-    SELECT up.user_id,
+    -- active presence (online), ensure single row per user
+    SELECT DISTINCT ON (up.user_id)
+           up.user_id,
            up.last_heartbeat_at,
            up.check_out_at,
-           up.check_in_at
+           up.check_in_at,
+           up.location_id
     FROM public.user_presence up
     WHERE up.check_out_at IS NULL
+    ORDER BY up.user_id, up.last_heartbeat_at DESC NULLS LAST, up.check_in_at DESC NULLS LAST
+  ),
+  last_pres AS (
+    -- last known presence per user for fallback location
+    SELECT DISTINCT ON (up.user_id)
+           up.user_id,
+           up.location_id,
+           GREATEST(
+             COALESCE(up.last_heartbeat_at, timestamp 'epoch'),
+             COALESCE(up.check_in_at,        timestamp 'epoch'),
+             COALESCE(up.check_out_at,       timestamp 'epoch')
+           ) AS last_ts
+    FROM public.user_presence up
+    ORDER BY up.user_id, last_ts DESC
   ),
   joined AS (
     SELECT b.*,
@@ -117,17 +134,30 @@ BEGIN
                COALESCE(p.check_in_at, timestamp 'epoch')
              ), 'YYYY-MM-DD"T"HH24:MI:SSZ'
            ) AS "lastSeen",
+           COALESCE(p.location_id, lp.location_id, b.location_id) AS location_id_effective,
            '-'::text AS distance
     FROM base b
-    LEFT JOIN pres p ON p.user_id = b.member_id
+    LEFT JOIN pres p   ON p.user_id = b.member_id
+    LEFT JOIN last_pres lp ON lp.user_id = b.member_id
+  ),
+  loc AS (
+    SELECT l.id, l.name FROM public.locations l WHERE l.organization_id = 5
   ),
   conns AS (
-    SELECT CASE WHEN c.requester_id = v_uid THEN c.addressee_id ELSE c.requester_id END AS peer_id,
+    SELECT DISTINCT ON (peer_id)
+           peer_id,
            c.connection_type,
            c.status
-    FROM public.connections c
-    WHERE c.organization_id = 5
-      AND (c.requester_id = v_uid OR c.addressee_id = v_uid)
+    FROM (
+      SELECT CASE WHEN c.requester_id = v_uid THEN c.addressee_id ELSE c.requester_id END AS peer_id,
+             c.connection_type,
+             c.status,
+             COALESCE(c.updated_at, c.created_at) AS ord_ts
+      FROM public.connections c
+      WHERE c.organization_id = 5
+        AND (c.requester_id = v_uid OR c.addressee_id = v_uid)
+    ) c
+    ORDER BY peer_id, ord_ts DESC
   ),
   filtered AS (
     SELECT j.*, cc.status as connection_status, cc.connection_type as connection_type
@@ -144,8 +174,11 @@ BEGIN
     SELECT COUNT(*) AS total FROM filtered
   ),
   page AS (
-    SELECT * FROM filtered
-    ORDER BY "isOnline" DESC, name ASC
+    -- ensure distinct members on page output
+    SELECT DISTINCT ON (f.member_id)
+           f.*, (SELECT name FROM loc WHERE id = f.location_id_effective) AS location_name
+    FROM filtered f
+    ORDER BY f.member_id, "isOnline" DESC, name ASC
     OFFSET v_offset LIMIT COALESCE(p_page_size,10)
   )
   SELECT jsonb_build_object(
@@ -304,7 +337,9 @@ LANGUAGE sql
 SECURITY DEFINER
 SET search_path TO 'public'
 AS $$
-  WITH base AS (
+  WITH me AS (
+    SELECT auth.uid() AS v_uid
+  ), base AS (
     SELECT c.id::text AS id,
            c.member_id,
            c.location_id,
@@ -314,33 +349,68 @@ AS $$
            c.gallery_images,
            c.date_of_birth,
            c.gender,
-           c.interests
+           c.interests,
+           c.last_visit_at
     FROM public.customers c
     WHERE c.organization_id = 5
       AND (c.id::text = p_id OR c.member_id::text = p_id)
   ), pres AS (
-    SELECT up.user_id,
+    -- ensure single active presence row per user
+    SELECT DISTINCT ON (up.user_id)
+           up.user_id,
            up.last_heartbeat_at,
            up.check_in_at,
-           up.check_out_at
+           up.check_out_at,
+           up.location_id
     FROM public.user_presence up
     WHERE up.check_out_at IS NULL
+    ORDER BY up.user_id, up.last_heartbeat_at DESC NULLS LAST, up.check_in_at DESC NULLS LAST
+  ), last_pres AS (
+    SELECT DISTINCT ON (up.user_id)
+           up.user_id,
+           up.location_id,
+           GREATEST(
+             COALESCE(up.last_heartbeat_at, timestamp 'epoch'),
+             COALESCE(up.check_in_at,        timestamp 'epoch'),
+             COALESCE(up.check_out_at,       timestamp 'epoch')
+           ) AS last_ts
+    FROM public.user_presence up
+    ORDER BY up.user_id, last_ts DESC
   ), loc AS (
     SELECT l.id, l.name FROM public.locations l WHERE l.organization_id = 5
+  ), conn AS (
+    SELECT DISTINCT ON (peer_id)
+           peer_id,
+           status,
+           connection_type
+    FROM (
+      SELECT CASE WHEN c.requester_id = (SELECT v_uid FROM me) THEN c.addressee_id ELSE c.requester_id END AS peer_id,
+             c.status,
+             c.connection_type,
+             COALESCE(c.updated_at, c.created_at) AS ord_ts
+      FROM public.connections c
+      WHERE c.organization_id = 5
+        AND ((c.requester_id = (SELECT v_uid FROM me)) OR (c.addressee_id = (SELECT v_uid FROM me)))
+    ) x
+    ORDER BY peer_id, ord_ts DESC
   )
   SELECT to_jsonb(j) FROM (
     SELECT b.*,
-      loc.name AS location_name,
+      (SELECT name FROM loc WHERE id = COALESCE(p.location_id, lp.location_id, b.location_id)) AS location_name,
       (p.user_id IS NOT NULL AND p.last_heartbeat_at >= now() - interval '120 seconds') AS "isOnline",
-      to_char(
-        GREATEST(
-          COALESCE(p.last_heartbeat_at, timestamp 'epoch'),
-          COALESCE(p.check_in_at, timestamp 'epoch')
-        ), 'YYYY-MM-DD"T"HH24:MI:SSZ'
-      ) AS "lastSeen"
+      CASE
+        WHEN COALESCE(p.last_heartbeat_at, p.check_in_at, lp.last_ts, b.last_visit_at) IS NULL THEN NULL
+        ELSE to_char(
+          COALESCE(p.last_heartbeat_at, p.check_in_at, lp.last_ts, b.last_visit_at),
+          'YYYY-MM-DD"T"HH24:MI:SSZ'
+        )
+      END AS "lastSeen",
+      c.status AS connection_status,
+      c.connection_type
     FROM base b
     LEFT JOIN pres p ON p.user_id = b.member_id
-    LEFT JOIN loc ON loc.id = b.location_id
+    LEFT JOIN last_pres lp ON lp.user_id = b.member_id
+    LEFT JOIN conn c ON c.peer_id = b.member_id
   ) j;
 $$;
 

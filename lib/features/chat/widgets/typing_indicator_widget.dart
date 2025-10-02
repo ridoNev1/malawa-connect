@@ -16,24 +16,41 @@ class TypingIndicatorWidget extends StatelessWidget {
           if (avatarUrl != null)
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: Image.network(
-                avatarUrl!,
-                width: 30,
-                height: 30,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return Container(
+              child: (() {
+                final String url = avatarUrl!.trim();
+                final bool valid = url.isNotEmpty &&
+                    (url.startsWith('http://') || url.startsWith('https://'));
+                if (valid) {
+                  return Image.network(
+                    url,
                     width: 30,
                     height: 30,
-                    color: MC.darkBrown.withOpacity(0.1),
-                    child: const Icon(
-                      Icons.person,
-                      size: 15,
-                      color: MC.darkBrown,
-                    ),
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        width: 30,
+                        height: 30,
+                        color: MC.darkBrown.withOpacity(0.1),
+                        child: const Icon(
+                          Icons.person,
+                          size: 15,
+                          color: MC.darkBrown,
+                        ),
+                      );
+                    },
                   );
-                },
-              ),
+                }
+                return Container(
+                  width: 30,
+                  height: 30,
+                  color: MC.darkBrown.withOpacity(0.1),
+                  child: const Icon(
+                    Icons.person,
+                    size: 15,
+                    color: MC.darkBrown,
+                  ),
+                );
+              })(),
             ),
           if (avatarUrl != null) const SizedBox(width: 8),
           Container(

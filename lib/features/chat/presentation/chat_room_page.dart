@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart' as image_picker;
 import '../../../core/theme/theme.dart';
 import 'package:go_router/go_router.dart';
+import '../../connect/providers/inapp_presence_provider.dart';
 import '../models/chat_room_model.dart';
 import '../providers/chat_room_provider.dart';
 import '../providers/chat_list_provider.dart';
@@ -10,7 +11,7 @@ import '../widgets/chat_bubble_widget.dart';
 import '../widgets/chat_input_widget.dart';
 import '../widgets/emoji_picker_widget.dart';
 import '../../connect/providers/member_detail_provider.dart';
-import '../../../core/services/mock_api.dart';
+import '../../../core/services/supabase_api.dart';
 
 class ChatRoomPage extends ConsumerStatefulWidget {
   final String chatId;
@@ -73,7 +74,10 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
     final chatState = ref.watch(chatRoomProviderFamily(_chatRoom));
     final chatNotifier = ref.read(chatRoomProviderFamily(_chatRoom).notifier);
     final room = chatState.chatRoom;
-    final memberAsync = ref.watch(memberByIdProvider(room.id));
+    final peerId = chatState.peerId;
+    final memberAsync = peerId != null && peerId.isNotEmpty
+        ? ref.watch(memberByIdProvider(peerId))
+        : const AsyncValue.data(null);
     final locationsAsync = ref.watch(chatLocationsProvider);
     bool headerOnline = false;
     if (memberAsync.hasValue && memberAsync.value != null) {
@@ -137,7 +141,26 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: InkWell(
-                      onTap: () => context.push('/profile/view/${room.id}'),
+                      onTap: () async {
+                        String? id = peerId;
+                        if (id == null || id.isEmpty) {
+                          // Try resolve peer from header
+                          // ignore: avoid_print
+                          
+                          final header = await SupabaseApi.getRoomHeaderOrg5(chatId: room.id);
+                          id = (header?['peer_id'] ?? header?['peerId'])?.toString();
+                        }
+                        if (id == null || id.isEmpty) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Memuat info pengguna... coba lagi')),
+                            );
+                          }
+                          return;
+                        }
+                        if (!mounted) return;
+                        context.push('/profile/view/$id');
+                      },
                       borderRadius: BorderRadius.circular(12),
                       child: Row(
                         children: [
@@ -145,37 +168,59 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
                             children: [
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(20),
-                                child: Image.network(
-                                  room.avatar,
-                                  width: 45,
-                                  height: 45,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return Container(
-                                      width: 45,
-                                      height: 45,
-                                      color: const Color.fromARGB(22, 62, 39, 35),
-                                      child: const Icon(
-                                        Icons.person,
-                                        size: 22,
-                                        color: MC.darkBrown,
+                                child: (room.avatar.isNotEmpty &&
+                                        (room.avatar.startsWith('http://') ||
+                                            room.avatar.startsWith('https://')))
+                                    ? Image.network(
+                                        room.avatar,
+                                        width: 45,
+                                        height: 45,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) {
+                                          return Container(
+                                            width: 45,
+                                            height: 45,
+                                            color: const Color.fromARGB(22, 62, 39, 35),
+                                            child: const Icon(
+                                              Icons.person,
+                                              size: 22,
+                                              color: MC.darkBrown,
+                                            ),
+                                          );
+                                        },
+                                      )
+                                    : Container(
+                                        width: 45,
+                                        height: 45,
+                                        color: const Color.fromARGB(22, 62, 39, 35),
+                                        child: const Icon(
+                                          Icons.person,
+                                          size: 22,
+                                          color: MC.darkBrown,
+                                        ),
                                       ),
-                                    );
-                                  },
-                                ),
                               ),
                               Positioned(
                                 bottom: 0,
                                 right: 0,
-                                child: Container(
-                                  width: 15,
-                                  height: 15,
-                                  decoration: BoxDecoration(
-                                    color: headerOnline ? Colors.green : Colors.grey,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: Colors.white, width: 2),
-                                  ),
-                                ),
+                                child: Consumer(builder: (context, ref, _) {
+                                  final peer = peerId ?? '';
+                                  final inApp = peer.isNotEmpty &&
+                                      ref
+                                          .watch(inAppPresenceProvider)
+                                          .activeUids
+                                          .contains(peer);
+                                  return Container(
+                                    width: 15,
+                                    height: 15,
+                                    decoration: BoxDecoration(
+                                      color: inApp ? Colors.green : Colors.grey,
+                                      shape: BoxShape.circle,
+                                      border:
+                                          Border.all(color: Colors.white, width: 2),
+                                    ),
+                                  );
+                                }),
                               ),
                             ],
                           ),
@@ -195,14 +240,15 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
                                 Builder(builder: (context) {
                                   String label = '...';
                                   Color color = Colors.grey[600]!;
-                                  bool online = false;
-                                  if (memberAsync.hasValue && memberAsync.value != null) {
-                                    final m = memberAsync.value!;
-                                    online = (m['isOnline'] as bool?) == true;
-                                    if (online) {
-                                      String locName = '-';
-                                      final locId = m['location_id'] as int?;
-                                      if (locationsAsync.hasValue) {
+                                  bool online = room.isOnline;
+                                  if (online) {
+                                    // Prefer location from header (presence fallback done server-side)
+                                    String locName = (room.locationName ?? '').toString();
+                                    if (locName.isEmpty) {
+                                      // Fallback to member/location providers if header lacks it (older DB)
+                                      if (memberAsync.hasValue && memberAsync.value != null && locationsAsync.hasValue) {
+                                        final m = memberAsync.value!;
+                                        final locId = m['location_id'] as int?;
                                         final locs = locationsAsync.value!;
                                         final found = locs.firstWhere(
                                           (e) => e['id'] == locId,
@@ -212,12 +258,12 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
                                           locName = (found['name'] ?? '-').toString();
                                         }
                                       }
-                                      label = 'Online di $locName';
-                                      color = Colors.green[600]!;
-                                    } else {
-                                      label = 'Out of Coffee';
-                                      color = Colors.grey[600]!;
                                     }
+                                    label = 'Online di ' + (locName.isEmpty ? '-' : locName);
+                                    color = Colors.green[600]!;
+                                  } else {
+                                    label = 'Out of Coffee';
+                                    color = Colors.grey[600]!;
                                   }
                                   return Row(
                                     children: [
@@ -343,11 +389,13 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
 
     // Scroll to bottom
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
@@ -469,16 +517,17 @@ class _ChatRoomPageState extends ConsumerState<ChatRoomPage> {
 
     // Scroll to bottom
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 }
 
-final chatLocationsProvider =
-    FutureProvider<List<Map<String, dynamic>>>((ref) async {
-  return await MockApi.instance.getLocations();
+final chatLocationsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  return await SupabaseApi.getLocationsOrg5();
 });

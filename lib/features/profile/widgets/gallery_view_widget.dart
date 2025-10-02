@@ -141,13 +141,18 @@ class GalleryViewWidget extends ConsumerWidget {
                                                 );
                                               },
                                         )
-                                      : Image.network(
-                                          galleryImages[index],
-                                          fit: BoxFit.cover,
-                                          width: double.infinity,
-                                          height: double.infinity,
-                                          errorBuilder:
-                                              (context, error, stackTrace) {
+                                      : (() {
+                                          final String url = galleryImages[index];
+                                          final bool valid = url.isNotEmpty &&
+                                              (url.startsWith('http://') ||
+                                                  url.startsWith('https://'));
+                                          if (valid) {
+                                            return Image.network(
+                                              url,
+                                              fit: BoxFit.cover,
+                                              width: double.infinity,
+                                              height: double.infinity,
+                                              errorBuilder: (context, error, stackTrace) {
                                                 return Container(
                                                   color: MC.darkBrown
                                                       .withValues(alpha: 0.1),
@@ -158,7 +163,18 @@ class GalleryViewWidget extends ConsumerWidget {
                                                   ),
                                                 );
                                               },
-                                        ),
+                                            );
+                                          }
+                                          return Container(
+                                            color:
+                                                MC.darkBrown.withValues(alpha: 0.1),
+                                            child: const Icon(
+                                              Icons.broken_image,
+                                              size: 40,
+                                              color: MC.darkBrown,
+                                            ),
+                                          );
+                                        })(),
                                 ),
                               ),
                             ],
@@ -254,22 +270,40 @@ class _FullScreenGalleryPageState extends State<FullScreenGalleryPage> {
                           base64Decode(widget.images[index].split(',').last),
                           fit: BoxFit.contain,
                         )
-                      : Image.network(
-                          widget.images[index],
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              width: double.infinity,
-                              height: double.infinity,
-                              color: MC.darkBrown.withValues(alpha: 0.1),
-                              child: const Icon(
-                                Icons.broken_image,
-                                size: 100,
-                                color: MC.darkBrown,
-                              ),
+                      : (() {
+                          final String url = widget.images[index];
+                          final bool valid = url.isNotEmpty &&
+                              (url.startsWith('http://') ||
+                                  url.startsWith('https://'));
+                          if (valid) {
+                            return Image.network(
+                              url,
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  width: double.infinity,
+                                  height: double.infinity,
+                                  color: MC.darkBrown.withValues(alpha: 0.1),
+                                  child: const Icon(
+                                    Icons.broken_image,
+                                    size: 100,
+                                    color: MC.darkBrown,
+                                  ),
+                                );
+                              },
                             );
-                          },
-                        ),
+                          }
+                          return Container(
+                            width: double.infinity,
+                            height: double.infinity,
+                            color: MC.darkBrown.withValues(alpha: 0.1),
+                            child: const Icon(
+                              Icons.broken_image,
+                              size: 100,
+                              color: MC.darkBrown,
+                            ),
+                          );
+                        })(),
                 ),
               );
             },
@@ -414,10 +448,25 @@ class _FullScreenGalleryPageState extends State<FullScreenGalleryPage> {
                                           widget.images[index].split(',').last),
                                       fit: BoxFit.cover,
                                     )
-                                  : Image.network(
-                                      widget.images[index],
-                                      fit: BoxFit.cover,
-                                    ),
+                                  : (() {
+                                      final String url = widget.images[index];
+                                      final bool valid = url.isNotEmpty &&
+                                          (url.startsWith('http://') ||
+                                              url.startsWith('https://'));
+                                      if (valid) {
+                                        return Image.network(
+                                          url,
+                                          fit: BoxFit.cover,
+                                        );
+                                      }
+                                      return Container(
+                                        color: MC.darkBrown.withValues(alpha: 0.1),
+                                        child: const Icon(
+                                          Icons.broken_image,
+                                          color: MC.darkBrown,
+                                        ),
+                                      );
+                                    })(),
                             ),
                           ),
                         );

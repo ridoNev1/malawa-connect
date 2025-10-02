@@ -99,21 +99,25 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
           children: [
             Row(
               children: [
-                if (((notification['senderAvatar'] ??
-                            notification['sender_avatar']) ??
-                        '')
-                    .toString()
-                    .isNotEmpty)
-                  CircleAvatar(
+                (() {
+                  final String url = ((notification['senderAvatar'] ??
+                                      notification['sender_avatar']) ??
+                                  '')
+                              .toString()
+                              .trim();
+                  final bool valid = url.isNotEmpty &&
+                      (url.startsWith('http://') || url.startsWith('https://'));
+                  if (valid) {
+                    return CircleAvatar(
+                      radius: 24,
+                      backgroundImage: NetworkImage(url),
+                    );
+                  }
+                  return const CircleAvatar(
                     radius: 24,
-                    backgroundImage: NetworkImage(
-                      (notification['senderAvatar'] ??
-                              notification['sender_avatar'])
-                          .toString(),
-                    ),
-                  )
-                else
-                  const CircleAvatar(radius: 24, child: Icon(Icons.person)),
+                    child: Icon(Icons.person),
+                  );
+                })(),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -422,27 +426,28 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
                             ),
                             child: Row(
                               children: [
-                                if ((((notification['senderAvatar'] ??
-                                                notification['sender_avatar']) ??
-                                            notification['senderavatar']) ??
-                                        '')
-                                    .toString()
-                                    .isNotEmpty)
-                                  CircleAvatar(
-                                    radius: 12,
-                                    backgroundImage: NetworkImage(
-                                      ((notification['senderAvatar'] ??
-                                                  notification['sender_avatar']) ??
-                                              notification['senderavatar'])
-                                          .toString(),
-                                    ),
-                                  )
-                                else
-                                  const Icon(
+                                (() {
+                                  final String url = ((((notification['senderAvatar'] ??
+                                                      notification['sender_avatar']) ??
+                                                  notification['senderavatar']) ??
+                                              '')
+                                          .toString())
+                                      .trim();
+                                  final bool valid = url.isNotEmpty &&
+                                      (url.startsWith('http://') ||
+                                          url.startsWith('https://'));
+                                  if (valid) {
+                                    return CircleAvatar(
+                                      radius: 12,
+                                      backgroundImage: NetworkImage(url),
+                                    );
+                                  }
+                                  return const Icon(
                                     Icons.person,
                                     size: 18,
                                     color: MC.darkBrown,
-                                  ),
+                                  );
+                                })(),
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Builder(

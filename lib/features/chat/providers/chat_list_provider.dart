@@ -1,4 +1,5 @@
 // lib/features/chat/providers/chat_list_provider.dart
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/services/supabase_api.dart';
@@ -37,6 +38,7 @@ class ChatListState {
 
 class ChatListNotifier extends Notifier<ChatListState> {
   RealtimeChannel? _userChan;
+  StreamSubscription<AuthState>? _authSub;
   @override
   ChatListState build() {
     ref.onDispose(() async {
@@ -45,8 +47,12 @@ class ChatListNotifier extends Notifier<ChatListState> {
           await _userChan!.unsubscribe();
         } catch (_) {}
       }
+      await _authSub?.cancel();
     });
     _initRealtime();
+    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((evt) {
+      loadChatRooms();
+    });
     return ChatListState(chatRooms: []);
   }
 
@@ -54,40 +60,42 @@ class ChatListNotifier extends Notifier<ChatListState> {
     final uid = Supabase.instance.client.auth.currentUser?.id;
     if (uid == null) return;
     _userChan = SupabaseApi.userChannel(uid: uid)
-      ..onBroadcast(event: 'chat_update', callback: (payload, [ref]) async {
-        // payload shape can be Map with {event, payload}
-        Map<String, dynamic>? data;
-        if (payload is Map) {
+      ..onBroadcast(
+        event: 'chat_update',
+        callback: (payload, [ref]) async {
+          Map<String, dynamic>? data;
           if (payload['payload'] is Map) {
             data = (payload['payload'] as Map).cast<String, dynamic>();
           } else {
             data = payload.cast<String, dynamic>();
           }
-        }
-        if (data != null) {
+          // ignore: avoid_print
+          print(
+            '[debugging] chat_list.broadcast chat_update: ' + data.toString(),
+          );
           // Soft-refresh: update last message in-place if found
           final chatId = (data['chat_id'] ?? '').toString();
           final lastText = (data['last_message_text'] ?? '').toString();
           final lastAt = (data['last_message_at'] ?? '').toString();
           final updated = state.chatRooms.map((e) {
             if (e['id'].toString() == chatId) {
-              return {
-                ...e,
-                'lastMessage': lastText,
-                'lastMessageTime': lastAt,
-              };
+              return {...e, 'lastMessage': lastText, 'lastMessageTime': lastAt};
             }
             return e;
           }).toList();
           state = state.copyWith(chatRooms: updated);
           // Optionally resort by lastMessageTime via full refresh
           await loadChatRooms();
-        }
-      })
+        },
+      )
       ..subscribe();
   }
 
   Future<void> loadChatRooms() async {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) {
+      return;
+    }
     state = state.copyWith(isLoading: true);
     try {
       final chatRooms = await SupabaseApi.getChatListOrg5(
@@ -95,12 +103,13 @@ class ChatListNotifier extends Notifier<ChatListState> {
         limit: state.pageSize,
         offset: 0,
       );
+      
       state = state.copyWith(
         chatRooms: chatRooms,
         hasMore: chatRooms.length == state.pageSize,
       );
     } catch (e) {
-      // Handle error
+      // Handle error silently
     } finally {
       state = state.copyWith(isLoading: false);
     }
@@ -116,6 +125,7 @@ class ChatListNotifier extends Notifier<ChatListState> {
         limit: state.pageSize,
         offset: offset,
       );
+      
       state = state.copyWith(
         chatRooms: [...state.chatRooms, ...more],
         isLoadingMore: false,

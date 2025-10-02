@@ -5,6 +5,7 @@ class ChatRoomModel {
   final String avatar;
   final bool isOnline;
   final String lastSeen;
+  final String? locationName;
 
   ChatRoomModel({
     required this.id,
@@ -12,6 +13,7 @@ class ChatRoomModel {
     required this.avatar,
     required this.isOnline,
     required this.lastSeen,
+    this.locationName,
   });
 
   factory ChatRoomModel.fromJson(Map<String, dynamic> json) {
@@ -21,6 +23,7 @@ class ChatRoomModel {
       avatar: json['avatar'] ?? '',
       isOnline: json['isOnline'] ?? false,
       lastSeen: json['lastSeen'] ?? '',
+      locationName: json['locationName'] ?? json['location_name'],
     );
   }
 
@@ -31,6 +34,7 @@ class ChatRoomModel {
       'avatar': avatar,
       'isOnline': isOnline,
       'lastSeen': lastSeen,
+      if (locationName != null) 'locationName': locationName,
     };
   }
 }

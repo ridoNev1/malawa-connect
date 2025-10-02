@@ -263,13 +263,15 @@ RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path TO 'public' AS $$
     WHERE cp2.chat_id = p_chat_id AND cp2.user_id <> auth.uid()
     LIMIT 1
   ), prof AS (
-    SELECT c.member_id, c.full_name AS name, c.profile_image_url AS avatar
+    SELECT c.member_id, c.full_name AS name, c.profile_image_url AS avatar, c.location_id AS fallback_location_id
     FROM public.customers c
     JOIN peer ON peer.peer_id = c.member_id AND c.organization_id = 5
   ), pres AS (
-    SELECT up.user_id, up.last_heartbeat_at, up.check_in_at
+    SELECT up.user_id, up.last_heartbeat_at, up.check_in_at, up.location_id
     FROM public.user_presence up
     WHERE up.check_out_at IS NULL
+  ), loc AS (
+    SELECT l.id, l.name FROM public.locations l WHERE l.organization_id = 5
   )
   SELECT to_jsonb(x) FROM (
     SELECT p_chat_id AS id,
@@ -277,7 +279,9 @@ RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path TO 'public' AS $$
            prof.avatar,
            (peer.peer_id)::uuid AS peer_id,
            (pres.user_id IS NOT NULL AND pres.last_heartbeat_at >= now() - interval '120 seconds') AS "isOnline",
-           to_char(GREATEST(COALESCE(pres.last_heartbeat_at, timestamp 'epoch'), COALESCE(pres.check_in_at, timestamp 'epoch')), 'YYYY-MM-DD"T"HH24:MI:SSZ') AS "lastSeen"
+           to_char(GREATEST(COALESCE(pres.last_heartbeat_at, timestamp 'epoch'), COALESCE(pres.check_in_at, timestamp 'epoch')), 'YYYY-MM-DD"T"HH24:MI:SSZ') AS "lastSeen",
+           COALESCE(pres.location_id, prof.fallback_location_id) AS "locationId",
+           (SELECT l2.name FROM loc l2 WHERE l2.id = COALESCE(pres.location_id, prof.fallback_location_id)) AS "locationName"
     FROM prof
     LEFT JOIN pres ON pres.user_id = prof.member_id
     LEFT JOIN peer ON TRUE
@@ -341,13 +345,25 @@ BEGIN
     SELECT * INTO v_msg FROM public.chat_messages WHERE id = p_client_id;
   END IF;
 
-  -- Update room last message
-  UPDATE public.chat_rooms SET last_message_text = v_msg.text, last_message_at = v_msg.created_at
+  -- Update room last message (use placeholder for images)
+  UPDATE public.chat_rooms
+     SET last_message_text = CASE WHEN v_msg.is_image THEN '[image]' ELSE COALESCE(v_msg.text, '') END,
+         last_message_at  = v_msg.created_at
   WHERE id = p_chat_id;
 
   -- Increment unread for other participants
   UPDATE public.chat_participants SET unread_count = unread_count + 1
   WHERE chat_id = p_chat_id AND user_id <> v_uid;
+
+  -- Optional: create notifications for other participants (new message)
+  INSERT INTO public.notifications (id, user_id, sender_id, type, title, message, is_read, requires_action, payload, organization_id, created_at)
+  SELECT gen_random_uuid(), cp.user_id, v_uid, 'newMessage', 'Pesan baru',
+         CASE WHEN COALESCE(v_msg.text,'') <> '' THEN v_msg.text ELSE '[image]' END,
+         false, false,
+         jsonb_build_object('chat_id', p_chat_id, 'message_id', v_msg.id),
+         5, now()
+  FROM public.chat_participants cp
+  WHERE cp.chat_id = p_chat_id AND cp.user_id <> v_uid;
 
   -- Realtime handled via client channels (no DB broadcast)
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/services/supabase_api.dart';
+import '../../../core/services/local_notifications.dart';
 
 class NotificationsState {
   final List<Map<String, dynamic>> items;
@@ -56,6 +57,22 @@ class NotificationsNotifier extends Notifier<NotificationsState> {
             value: uid,
           ),
           callback: (payload) async {
+            try {
+              final dynamic rec = (payload as dynamic).newRecord;
+              final type = (rec?['type'] ?? '').toString();
+              final title = () {
+                if (type == 'newMessage') return 'Pesan baru';
+                if (type == 'connectionRequest') return 'Permintaan koneksi';
+                if (type == 'connectionAccepted') return 'Koneksi diterima';
+                return 'Notifikasi baru';
+              }();
+              final body = (rec?['message'] ?? '').toString().isNotEmpty
+                  ? rec['message'].toString()
+                  : (type == 'newMessage' ? 'Ada pesan baru' : '');
+              // Show a foreground local notification
+              await LocalNotifications.show(title: title, body: body);
+              // Lazy import to avoid circulars
+            } catch (_) {}
             // To keep consistent shape (with senderName/avatar), just refresh
             await refresh();
           },
@@ -95,12 +112,13 @@ class NotificationsNotifier extends Notifier<NotificationsState> {
       );
       // Normalize keys to camelCase we use in UI
       final normalized = list.map(_normalizeKeys).toList();
-      // Show connection-related notifications we care about now
+      // Show connection and chat notifications
       final filtered = normalized
           .where(
             (n) =>
                 n['type'] == 'connectionAccepted' ||
-                n['type'] == 'connectionRequest',
+                n['type'] == 'connectionRequest' ||
+                n['type'] == 'newMessage',
           )
           .toList();
       final enriched = await _enrichSender(filtered);

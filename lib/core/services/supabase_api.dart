@@ -103,7 +103,20 @@ class SupabaseApi {
       'p_limit': limit,
       'p_offset': offset,
     });
-    if (res is List) return res.whereType<Map<String, dynamic>>().toList();
+    if (res is List) {
+      final list = res.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      // Normalize keys to camelCase used by UI
+      final norm = list.map((m) {
+        return {
+          ...m,
+          'lastMessage': m['lastMessage'] ?? m['lastmessage'],
+          'lastMessageTime': m['lastMessageTime'] ?? m['lastmessagetime'],
+          'unreadCount': m['unreadCount'] ?? m['unreadcount'],
+          'isOnline': m['isOnline'] ?? m['isonline'],
+        };
+      }).toList();
+      return norm;
+    }
     return const [];
   }
 
@@ -142,12 +155,17 @@ class SupabaseApi {
     String? imageUrl,
     String? clientId,
   }) async {
+    bool _isValidUuid(String s) {
+      final r = RegExp(
+          r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\$');
+      return r.hasMatch(s);
+    }
     final params = <String, dynamic>{
       'p_chat_id': chatId,
       'p_text': text,
       'p_is_image': isImage,
       if (imageUrl != null) 'p_image_url': imageUrl,
-      if (clientId != null) 'p_client_id': clientId,
+      if (clientId != null && _isValidUuid(clientId)) 'p_client_id': clientId,
     };
     final res = await _c.rpc('send_message_org5', params: params);
     if (res is Map<String, dynamic>) return res;

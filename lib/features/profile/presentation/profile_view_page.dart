@@ -8,11 +8,11 @@ import '../../../core/theme/theme.dart';
 import '../../../shared/widgets/bottom_navigation.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/profile_header_widget.dart';
-import '../../../core/services/mock_api.dart';
 import '../widgets/personal_info_view_widget.dart';
 import '../widgets/preference_view_widget.dart';
 import '../widgets/interests_view_widget.dart';
 import '../widgets/gallery_view_widget.dart';
+import '../../../core/services/supabase_api.dart';
 
 class ProfileViewPage extends ConsumerStatefulWidget {
   final String userId;
@@ -95,15 +95,22 @@ class _ProfileViewPageState extends ConsumerState<ProfileViewPage> {
             onPressed: () async {
               try {
                 // Resolve peer's member_id via provider (RPC returns both legacy id & member_id)
-                final m = await ref.read(memberByIdProvider(widget.userId).future);
-                final peerUuid = (m?['member_id'] ?? m?['memberId'])?.toString();
+                final m = await ref.read(
+                  memberByIdProvider(widget.userId).future,
+                );
+                final peerUuid = (m?['member_id'] ?? m?['memberId'])
+                    ?.toString();
                 if (peerUuid == null || peerUuid.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Gagal membuka chat: ID tidak valid')),
+                    const SnackBar(
+                      content: Text('Gagal membuka chat: ID tidak valid'),
+                    ),
                   );
                   return;
                 }
-                final room = await SupabaseApi.getOrCreateDirectChat(peerId: peerUuid);
+                final room = await SupabaseApi.getOrCreateDirectChat(
+                  peerId: peerUuid,
+                );
                 final roomId = (room?['id'] ?? '').toString();
                 if (roomId.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -191,18 +198,18 @@ class _ProfileViewPageState extends ConsumerState<ProfileViewPage> {
               onTap: () async {
                 Navigator.pop(context);
                 try {
-                  final data = await ref
-                      .read(memberByIdProvider(widget.userId).future);
-                  final pretty = const JsonEncoder.withIndent('  ')
-                      .convert(data ?? {});
+                  final data = await ref.read(
+                    memberByIdProvider(widget.userId).future,
+                  );
+                  final pretty = const JsonEncoder.withIndent(
+                    '  ',
+                  ).convert(data ?? {});
                   // ignore: use_build_context_synchronously
                   showDialog(
                     context: context,
                     builder: (ctx) => AlertDialog(
                       title: const Text('Member Detail (Debug)'),
-                      content: SingleChildScrollView(
-                        child: Text(pretty),
-                      ),
+                      content: SingleChildScrollView(child: Text(pretty)),
                       actions: [
                         TextButton(
                           onPressed: () => Navigator.of(ctx).pop(),

@@ -5,12 +5,12 @@ import 'package:intl/intl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:malawa_connect/core/services/mock_api.dart';
 import '../../../core/theme/theme.dart';
 import '../providers/profile_provider.dart';
 import '../../../core/services/supabase_api.dart';
 import '../../home/providers/home_providers.dart';
 import '../../connect/providers/member_detail_provider.dart';
+import '../../connect/providers/inapp_presence_provider.dart';
 
 class ProfileHeaderWidget extends ConsumerWidget {
   final bool isEditable;
@@ -88,66 +88,116 @@ class ProfileHeaderWidget extends ConsumerWidget {
           children: [
             GestureDetector(
               onTap: showFullScreenImage,
-              child: Stack(
-                children: [
-                  Container(
-                    width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: MC.darkBrown.withValues(alpha: 0.2),
-                        width: 4,
+              child: SizedBox(
+                width: 120,
+                height: 120,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Outer ring
+                    Container(
+                      width: 120,
+                      height: 120,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: MC.darkBrown.withValues(alpha: 0.2),
+                          width: 4,
+                        ),
                       ),
                     ),
-                    child: ClipOval(
-                      child: profile.profileImageUrl != null
-                          ? profile.profileImageUrl!.startsWith('data:image')
-                                ? Image.memory(
-                                    base64Decode(
-                                      profile.profileImageUrl!.split(',').last,
+                    // Avatar image (slightly inset so border doesn’t clip)
+                    ClipOval(
+                      child: SizedBox(
+                        width: 112,
+                        height: 112,
+                        child: (() {
+                            final String? url = profile.profileImageUrl;
+                            if (url == null || url.trim().isEmpty) {
+                              return Container(
+                                color: MC.darkBrown.withValues(alpha: 0.1),
+                                child: const Icon(
+                                  Icons.person,
+                                  size: 60,
+                                  color: MC.darkBrown,
+                                ),
+                              );
+                            }
+                            if (url.startsWith('data:image')) {
+                              return Image.memory(
+                                base64Decode(url.split(',').last),
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    color: MC.darkBrown.withValues(alpha: 0.1),
+                                    child: const Icon(
+                                      Icons.person,
+                                      size: 60,
+                                      color: MC.darkBrown,
                                     ),
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return Container(
-                                        color: MC.darkBrown.withValues(
-                                          alpha: 0.1,
-                                        ),
-                                        child: const Icon(
-                                          Icons.person,
-                                          size: 60,
-                                          color: MC.darkBrown,
-                                        ),
-                                      );
-                                    },
-                                  )
-                                : Image.network(
-                                    profile.profileImageUrl!,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return Container(
-                                        color: MC.darkBrown.withValues(
-                                          alpha: 0.1,
-                                        ),
-                                        child: const Icon(
-                                          Icons.person,
-                                          size: 60,
-                                          color: MC.darkBrown,
-                                        ),
-                                      );
-                                    },
-                                  )
-                          : Container(
+                                  );
+                                },
+                              );
+                            }
+                            final bool valid = url.startsWith('http://') || url.startsWith('https://');
+                            if (valid) {
+                              return Image.network(
+                                url,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    color: MC.darkBrown.withValues(alpha: 0.1),
+                                    child: const Icon(
+                                      Icons.person,
+                                      size: 60,
+                                      color: MC.darkBrown,
+                                    ),
+                                  );
+                                },
+                              );
+                            }
+                            return Container(
                               color: MC.darkBrown.withValues(alpha: 0.1),
                               child: const Icon(
                                 Icons.person,
                                 size: 60,
                                 color: MC.darkBrown,
                               ),
-                            ),
+                            );
+                          })(),
+                      ),
                     ),
-                  ),
-                ],
+                    // In-app indicator on avatar (using member_id parsed from avatar URL)
+                    Positioned(
+                      bottom: 10,
+                      right: 10,
+                      child: Consumer(builder: (context, ref, _) {
+                        String? memberIdFromAvatar() {
+                          final url = profile.profileImageUrl ?? '';
+                          final idx = url.indexOf('/org5/');
+                          if (idx == -1) return null;
+                          final start = idx + '/org5/'.length;
+                          final rest = url.substring(start);
+                          final segEnd = rest.indexOf('/');
+                          if (segEnd == -1) return null;
+                          return rest.substring(0, segEnd);
+                        }
+                        final uid = memberIdFromAvatar();
+                        final inApp = uid != null &&
+                            ref.watch(inAppPresenceProvider).activeUids.contains(uid);
+                        return Container(
+                          width: 16,
+                          height: 16,
+                          decoration: BoxDecoration(
+                            color: inApp ? Colors.green : Colors.grey,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                        );
+                      }),
+                    ),
+                  ],
+                ),
               ),
             ),
             if (isEditable)
@@ -441,13 +491,7 @@ class ProfileHeaderWidget extends ConsumerWidget {
     );
   }
 
-  Future<void> _openChat(BuildContext context, String userId) async {
-    // Ensure a chat exists with this user, then navigate
-    final chat = await MockApi.instance.getOrCreateDirectChatByUserId(userId);
-    if (context.mounted) {
-      context.push('/chat/room/${chat['id']}');
-    }
-  }
+  // Deprecated: old mock-based chat opener removed.
 }
 
 class _OnlineBadge extends StatelessWidget {
@@ -515,39 +559,57 @@ class FullScreenProfileImagePage extends StatelessWidget {
                 panEnabled: true,
                 minScale: 0.5,
                 maxScale: 4,
-                child: imageUrl.startsWith('data:image')
-                    ? Image.memory(
-                        base64Decode(imageUrl.split(',').last),
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            width: double.infinity,
-                            height: double.infinity,
-                            color: MC.darkBrown.withValues(alpha: 0.1),
-                            child: const Icon(
-                              Icons.person,
-                              size: 100,
-                              color: MC.darkBrown,
-                            ),
-                          );
-                        },
-                      )
-                    : Image.network(
-                        imageUrl,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            width: double.infinity,
-                            height: double.infinity,
-                            color: MC.darkBrown.withValues(alpha: 0.1),
-                            child: const Icon(
-                              Icons.person,
-                              size: 100,
-                              color: MC.darkBrown,
-                            ),
-                          );
-                        },
-                      ),
+                child: (() {
+                  final String url = imageUrl.trim();
+                  if (url.startsWith('data:image')) {
+                    return Image.memory(
+                      base64Decode(url.split(',').last),
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          width: double.infinity,
+                          height: double.infinity,
+                          color: MC.darkBrown.withValues(alpha: 0.1),
+                          child: const Icon(
+                            Icons.person,
+                            size: 100,
+                            color: MC.darkBrown,
+                          ),
+                        );
+                      },
+                    );
+                  }
+                  final bool valid = url.isNotEmpty &&
+                      (url.startsWith('http://') || url.startsWith('https://'));
+                  if (valid) {
+                    return Image.network(
+                      url,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          width: double.infinity,
+                          height: double.infinity,
+                          color: MC.darkBrown.withValues(alpha: 0.1),
+                          child: const Icon(
+                            Icons.person,
+                            size: 100,
+                            color: MC.darkBrown,
+                          ),
+                        );
+                      },
+                    );
+                  }
+                  return Container(
+                    width: double.infinity,
+                    height: double.infinity,
+                    color: MC.darkBrown.withValues(alpha: 0.1),
+                    child: const Icon(
+                      Icons.person,
+                      size: 100,
+                      color: MC.darkBrown,
+                    ),
+                  );
+                })(),
               ),
             ),
           ),

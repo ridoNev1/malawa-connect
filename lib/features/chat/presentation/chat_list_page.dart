@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/theme.dart';
 import '../../../shared/widgets/bottom_navigation.dart';
 import '../providers/chat_list_provider.dart';
+import '../../connect/providers/inapp_presence_provider.dart';
 import 'chat_room_page.dart';
 
 class ChatListPage extends ConsumerStatefulWidget {
@@ -304,48 +305,80 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
         ),
         child: Row(
           children: [
-            // Avatar with online indicator
+            // Avatar with in-app indicator (avatar-only)
             Stack(
               children: [
                 Hero(
                   tag: 'avatar_${chat['id']}',
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(50),
-                    child: Image.network(
-                      chat['avatar'],
-                      width: 60,
-                      height: 60,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
+                    child: (() {
+                      final String url = (chat['avatar'] ?? '').toString();
+                      final bool valid = url.isNotEmpty &&
+                          (url.startsWith('http://') || url.startsWith('https://'));
+                      if (valid) {
+                        return Image.network(
+                          url,
                           width: 60,
                           height: 60,
-                          color: MC.darkBrown.withOpacity(0.1),
-                          child: const Icon(
-                            Icons.person,
-                            size: 30,
-                            color: MC.darkBrown,
-                          ),
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              width: 60,
+                              height: 60,
+                              color: MC.darkBrown.withOpacity(0.1),
+                              child: const Icon(
+                                Icons.person,
+                                size: 30,
+                                color: MC.darkBrown,
+                              ),
+                            );
+                          },
                         );
-                      },
-                    ),
+                      }
+                      return Container(
+                        width: 60,
+                        height: 60,
+                        color: MC.darkBrown.withOpacity(0.1),
+                        child: const Icon(
+                          Icons.person,
+                          size: 30,
+                          color: MC.darkBrown,
+                        ),
+                      );
+                    })(),
                   ),
                 ),
-                // Online indicator
-                if (isOnline)
-                  Positioned(
+                // In-app indicator (uses member_id parsed from avatar url)
+                Consumer(builder: (context, ref, _) {
+                  String? memberIdFromAvatar() {
+                    final url = (chat['avatar'] ?? '').toString();
+                    final idx = url.indexOf('/org5/');
+                    if (idx == -1) return null;
+                    final start = idx + '/org5/'.length;
+                    final rest = url.substring(start);
+                    final segEnd = rest.indexOf('/');
+                    if (segEnd == -1) return null;
+                    final uid = rest.substring(0, segEnd);
+                    return uid;
+                  }
+                  final uid = memberIdFromAvatar();
+                  final inApp = uid != null &&
+                      ref.watch(inAppPresenceProvider).activeUids.contains(uid);
+                  return Positioned(
                     bottom: 0,
                     right: 0,
                     child: Container(
                       width: 18,
                       height: 18,
                       decoration: BoxDecoration(
-                        color: Colors.green,
+                        color: inApp ? Colors.green : Colors.grey,
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 3),
                       ),
                     ),
-                  ),
+                  );
+                }),
               ],
             ),
             const SizedBox(width: 16),
@@ -387,19 +420,25 @@ class _ChatListPageState extends ConsumerState<ChatListPage> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
-                        child: Text(
-                          (chat['lastMessage'] as String?)?.trim().isNotEmpty == true
-                              ? chat['lastMessage']
-                              : 'Belum ada percakapan',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: isUnread ? Colors.black87 : Colors.grey[600],
-                            fontWeight: isUnread
-                                ? FontWeight.w500
-                                : FontWeight.normal,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
+                        child: Builder(
+                          builder: (context) {
+                            final raw = (chat['lastMessage'] ?? '').toString().trim();
+                            final preview = raw.isEmpty
+                                ? 'Belum ada percakapan'
+                                : (raw == '[image]' ? 'Mengirim gambar' : raw);
+                            return Text(
+                              preview,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: isUnread ? Colors.black87 : Colors.grey[600],
+                                fontWeight: isUnread
+                                    ? FontWeight.w500
+                                    : FontWeight.normal,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            );
+                          },
                         ),
                       ),
                       // Unread count dengan desain baru
