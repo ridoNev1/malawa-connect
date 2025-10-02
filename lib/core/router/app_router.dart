@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:malawa_connect/features/chat/presentation/chat_list_page.dart';
@@ -13,9 +14,30 @@ import '../../features/auth/presentation/otp_page.dart';
 import '../../features/home/presentation/home_page.dart';
 
 final appRouter = GoRouter(
-  initialLocation: '/decide',
+  initialLocation: '/',
+  // React to auth changes
+  refreshListenable:
+      _GoRouterRefreshStream(Supabase.instance.client.auth.onAuthStateChange),
+  redirect: (context, state) {
+    final session = Supabase.instance.client.auth.currentSession;
+    final loggingIn = state.matchedLocation == '/login';
+    final onOtp = state.matchedLocation == '/otp';
+
+    if (session == null) {
+      // Allow login and otp (otp requires phone param)
+      if (loggingIn) return null;
+      if (onOtp) {
+        final phone = state.uri.queryParameters['phone'];
+        return (phone == null || phone.isEmpty) ? '/login' : null;
+      }
+      return '/login';
+    }
+
+    // If logged in, prevent going back to login/otp
+    if (loggingIn || onOtp) return '/';
+    return null;
+  },
   routes: [
-    GoRoute(path: '/decide', builder: (_, __) => const _DecidePage()),
     GoRoute(path: '/login', builder: (_, __) => const LoginPage()),
     GoRoute(
       path: '/otp',
@@ -37,7 +59,6 @@ final appRouter = GoRouter(
       },
     ),
     GoRoute(path: '/connect', builder: (context, state) => const ConnectPage()),
-    // Update chat routes
     GoRoute(path: '/chat', builder: (context, state) => const ChatListPage()),
     GoRoute(
       path: '/notifications',
@@ -53,18 +74,16 @@ final appRouter = GoRouter(
   ],
 );
 
-class _DecidePage extends StatelessWidget {
-  const _DecidePage();
+// Local refresh listenable for a Stream to work with GoRouter versions
+// that don't export GoRouterRefreshStream.
+class _GoRouterRefreshStream extends ChangeNotifier {
+  late final StreamSubscription<dynamic> _subscription;
+  _GoRouterRefreshStream(Stream<dynamic> stream) {
+    _subscription = stream.listen((_) => notifyListeners());
+  }
   @override
-  Widget build(BuildContext context) {
-    final session = Supabase.instance.client.auth.currentSession;
-    Future.microtask(() {
-      if (session == null) {
-        context.go('/login');
-      } else {
-        context.go('/');
-      }
-    });
-    return const Scaffold(body: SizedBox.shrink());
+  void dispose() {
+    _subscription.cancel();
+    super.dispose();
   }
 }

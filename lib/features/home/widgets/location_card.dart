@@ -5,12 +5,16 @@ class LocationCard extends StatelessWidget {
   final String cafeName;
   final String checkInTime;
   final String duration;
+  final bool isInside;
+  final String? statusMessage;
 
   const LocationCard({
     super.key,
     required this.cafeName,
     required this.checkInTime,
     required this.duration,
+    this.isInside = true,
+    this.statusMessage,
   });
 
   @override
@@ -66,15 +70,18 @@ class LocationCard extends StatelessWidget {
                             Container(
                               width: 8,
                               height: 8,
-                              decoration: const BoxDecoration(
-                                color: Colors.green,
+                              decoration: BoxDecoration(
+                                color: isInside ? Colors.green : Colors.red,
                                 shape: BoxShape.circle,
                               ),
                             ),
                             const SizedBox(width: 6),
-                            const Text(
-                              'Anda sedang berada di cafe',
-                              style: TextStyle(
+                            Text(
+                              statusMessage ??
+                                  (isInside
+                                      ? 'Anda sedang berada di cafe'
+                                      : 'Anda berada di luar jangkauan cafe'),
+                              style: const TextStyle(
                                 fontSize: 14,
                                 color: Colors.black54,
                               ),

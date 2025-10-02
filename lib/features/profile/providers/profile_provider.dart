@@ -1,9 +1,13 @@
 // lib/features/profile/providers/profile_provider.dart
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/services/mock_api.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/services/supabase_api.dart';
 import '../models/profile_models.dart';
+import '../../home/providers/home_providers.dart';
 
 class ProfileState {
   final ProfileModel profile;
@@ -47,19 +51,25 @@ class ProfileNotifier extends Notifier<ProfileState> {
   Future<void> loadUserData() async {
     state = state.copyWith(isLoading: true);
     try {
-      final me = await MockApi.instance.getCurrentUser();
+      // Load from Supabase (Org 5)
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      Map<String, dynamic>? me;
+      if (uid != null) {
+        me = await SupabaseApi.getCustomerByMemberIdOrg5(memberId: uid);
+      }
       state = state.copyWith(
         profile: ProfileModel(
-          fullName: me['full_name'] ?? '',
-          preference: (me['preference'] ?? 'Looking for Friends').toString(),
-          interests: List<String>.from(me['interests'] ?? const <String>[]),
-          galleryImages:
-              List<String>.from(me['gallery_images'] ?? const <String>[]),
-          profileImageUrl: me['profile_image_url'],
-          dateOfBirth: me['date_of_birth'] != null
-              ? DateTime.tryParse(me['date_of_birth'])
+          fullName: me?['full_name'] ?? '',
+          preference: (me?['preference'] ?? 'Looking for Friends').toString(),
+          interests: List<String>.from(me?['interests'] ?? const <String>[]),
+          galleryImages: List<String>.from(
+            me?['gallery_images'] ?? const <String>[],
+          ),
+          profileImageUrl: me?['profile_image_url'],
+          dateOfBirth: me?['date_of_birth'] != null
+              ? DateTime.tryParse(me?['date_of_birth'])
               : null,
-          gender: me['gender'],
+          gender: me?['gender'],
         ),
       );
     } catch (e) {
@@ -73,36 +83,32 @@ class ProfileNotifier extends Notifier<ProfileState> {
   Future<void> loadUserDataById(String userId) async {
     state = state.copyWith(isLoading: true);
     try {
-      final data = await MockApi.instance.getMemberById(userId);
-      if (data == null) {
-        state = state.copyWith(
-          profile: ProfileModel(
-            fullName: 'Unknown User',
-            preference: 'Looking for Friends',
-            interests: const [],
-            galleryImages: const [],
-          ),
-        );
-      } else {
-        state = state.copyWith(
-          profile: ProfileModel(
-            fullName: data['name'] ?? '',
-            preference:
-                (data['preference'] ?? 'Looking for Friends').toString(),
-            interests:
-                List<String>.from(data['interests'] ?? const <String>[]),
-            galleryImages:
-                List<String>.from(data['gallery_images'] ?? const <String>[]),
-            profileImageUrl: data['profile_image_url'],
-            dateOfBirth: data['date_of_birth'] != null
-                ? DateTime.tryParse(data['date_of_birth'])
-                : null,
-            gender: data['gender'],
-          ),
-        );
-      }
+      final data = await SupabaseApi.getMemberDetailOrg5(id: userId);
+      final safe = data ?? const <String, dynamic>{};
+      state = state.copyWith(
+        profile: ProfileModel(
+          fullName: (safe['name'] ?? 'Unknown User').toString(),
+          preference: (safe['preference'] ?? 'Looking for Friends').toString(),
+          interests: List<String>.from(safe['interests'] ?? const <String>[]),
+          galleryImages:
+              List<String>.from(safe['gallery_images'] ?? const <String>[]),
+          profileImageUrl: safe['avatar'],
+          dateOfBirth: safe['date_of_birth'] != null
+              ? DateTime.tryParse(safe['date_of_birth'].toString())
+              : null,
+          gender: safe['gender'],
+        ),
+      );
     } catch (e) {
-      // Handle error
+      // Fallback to minimal placeholder on error
+      state = state.copyWith(
+        profile: ProfileModel(
+          fullName: 'Unknown User',
+          preference: 'Looking for Friends',
+          interests: const [],
+          galleryImages: const [],
+        ),
+      );
     } finally {
       state = state.copyWith(isLoading: false);
     }
@@ -111,14 +117,41 @@ class ProfileNotifier extends Notifier<ProfileState> {
   Future<void> saveProfile() async {
     state = state.copyWith(isSaving: true);
     try {
-      final me = await MockApi.instance.getCurrentUser();
-      final memberId = (me['member_id'] ?? me['id']).toString();
-      await MockApi.instance.updateProfile(
-        userId: memberId,
-        payload: state.profile.toJson(),
+      final updated = await SupabaseApi.updateCustomerProfileOrg5(
+        fullName: state.profile.fullName,
+        preference: state.profile.preference,
+        interests: state.profile.interests,
+        galleryImages: state.profile.galleryImages,
+        profileImageUrl: state.profile.profileImageUrl,
+        dateOfBirth: state.profile.dateOfBirth,
+        gender: state.profile.gender,
       );
+      // Update local state with server response if available
+      if (updated != null) {
+        state = state.copyWith(
+          profile: ProfileModel(
+            fullName: (updated['full_name'] ?? '').toString(),
+            preference: (updated['preference'] ?? 'Looking for Friends')
+                .toString(),
+            interests: List<String>.from(
+              updated['interests'] ?? const <String>[],
+            ),
+            galleryImages: List<String>.from(
+              updated['gallery_images'] ?? const <String>[],
+            ),
+            profileImageUrl: updated['profile_image_url'],
+            dateOfBirth: updated['date_of_birth'] != null
+                ? DateTime.tryParse(updated['date_of_birth'].toString())
+                : null,
+            gender: updated['gender'],
+          ),
+        );
+      }
+      // Invalidate home providers so Home reflects latest data
+      ref.invalidate(currentUserProvider);
+      ref.invalidate(membershipSummaryProvider);
     } catch (e) {
-      // Handle error
+      // Handle error silently
     } finally {
       state = state.copyWith(isSaving: false);
     }
@@ -175,12 +208,24 @@ class ProfileNotifier extends Notifier<ProfileState> {
         state = state.copyWith(isLoading: true);
 
         final bytes = await image.readAsBytes();
-        final base64String = 'data:image/jpeg;base64,${base64Encode(bytes)}';
-
-        state = state.copyWith(
-          profile: state.profile.copyWith(profileImageUrl: base64String),
-          isLoading: false,
-        );
+        try {
+          final url = await SupabaseApi.uploadAvatar(
+            bytes: Uint8List.fromList(bytes),
+          );
+          state = state.copyWith(
+            profile: state.profile.copyWith(
+              profileImageUrl: url ?? state.profile.profileImageUrl,
+            ),
+            isLoading: false,
+          );
+        } catch (_) {
+          // Fallback: keep base64 to preserve UI
+          final base64String = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+          state = state.copyWith(
+            profile: state.profile.copyWith(profileImageUrl: base64String),
+            isLoading: false,
+          );
+        }
       }
     } catch (e) {
       state = state.copyWith(isLoading: false);
@@ -198,17 +243,34 @@ class ProfileNotifier extends Notifier<ProfileState> {
         state = state.copyWith(isLoading: true);
 
         final bytes = await image.readAsBytes();
-        final base64String = 'data:image/jpeg;base64,${base64Encode(bytes)}';
-
-        final updatedGalleryImages = List<String>.from(
-          state.profile.galleryImages,
-        );
-        updatedGalleryImages.add(base64String);
-
-        state = state.copyWith(
-          profile: state.profile.copyWith(galleryImages: updatedGalleryImages),
-          isLoading: false,
-        );
+        try {
+          final url = await SupabaseApi.uploadGalleryImage(
+            bytes: Uint8List.fromList(bytes),
+          );
+          final updatedGalleryImages = List<String>.from(
+            state.profile.galleryImages,
+          );
+          if (url != null) updatedGalleryImages.add(url);
+          state = state.copyWith(
+            profile: state.profile.copyWith(
+              galleryImages: updatedGalleryImages,
+            ),
+            isLoading: false,
+          );
+        } catch (_) {
+          // Fallback to base64
+          final base64String = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+          final updatedGalleryImages = List<String>.from(
+            state.profile.galleryImages,
+          );
+          updatedGalleryImages.add(base64String);
+          state = state.copyWith(
+            profile: state.profile.copyWith(
+              galleryImages: updatedGalleryImages,
+            ),
+            isLoading: false,
+          );
+        }
       }
     } catch (e) {
       state = state.copyWith(isLoading: false);

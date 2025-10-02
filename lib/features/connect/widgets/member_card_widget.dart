@@ -1,15 +1,40 @@
 // lib/features/connect/widgets/member_card_widget.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/theme.dart';
+import '../providers/members_provider.dart';
+import '../../../core/services/supabase_api.dart';
 
-class MemberCardWidget extends StatelessWidget {
+class MemberCardWidget extends ConsumerWidget {
   final Map<String, dynamic> member;
 
   const MemberCardWidget({super.key, required this.member});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    String _relativeTime(String? iso) {
+      if (iso == null || iso.isEmpty) return '-';
+      DateTime? dt;
+      try {
+        dt = DateTime.parse(iso).toLocal();
+      } catch (_) {
+        return '-';
+      }
+      final now = DateTime.now();
+      final diff = now.difference(dt);
+      if (diff.inSeconds < 60) return 'Baru saja';
+      if (diff.inMinutes < 60) return '${diff.inMinutes} menit yang lalu';
+      if (diff.inHours < 24) return '${diff.inHours} jam yang lalu';
+      if (diff.inDays < 7) return '${diff.inDays} hari yang lalu';
+      final weeks = (diff.inDays / 7).floor();
+      if (weeks < 5) return '$weeks minggu yang lalu';
+      final months = (diff.inDays / 30).floor();
+      if (months < 12) return '$months bulan yang lalu';
+      final years = (diff.inDays / 365).floor();
+      return '$years tahun yang lalu';
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -106,7 +131,10 @@ class MemberCardWidget extends StatelessWidget {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            member['distance'],
+                            (member['location_name']?.toString().isNotEmpty ??
+                                    false)
+                                ? member['location_name'].toString()
+                                : '-',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey[500],
@@ -120,7 +148,7 @@ class MemberCardWidget extends StatelessWidget {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            member['lastSeen'],
+                            _relativeTime(member['lastSeen']?.toString()),
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey[500],
@@ -164,31 +192,39 @@ class MemberCardWidget extends StatelessWidget {
                         ),
                       const SizedBox(height: 8),
                       // Interests
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: (member['interests'] as List<String>).map((
-                          interest,
-                        ) {
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: MC.darkBrown.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              interest,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: MC.darkBrown,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
+                      Builder(
+                        builder: (context) {
+                          final interests =
+                              (member['interests'] as List?)
+                                  ?.map((e) => e.toString())
+                                  .toList() ??
+                              const <String>[];
+                          if (interests.isEmpty) return const SizedBox.shrink();
+                          return Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: interests.map((interest) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: MC.darkBrown.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  interest,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: MC.darkBrown,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
                           );
-                        }).toList(),
+                        },
                       ),
                     ],
                   ),
@@ -196,27 +232,98 @@ class MemberCardWidget extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            // Only "Lihat Profil" button
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  // Navigate to profile view
-                  context.go('/profile/view/${member['id']}');
-                },
-                icon: const Icon(Icons.person, size: 18),
-                label: const Text('Lihat Profil'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: MC.darkBrown,
-                  side: const BorderSide(color: MC.darkBrown),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+            // Actions: Connect/Unfriend + View Profile
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      context.go('/profile/view/${member['id']}');
+                    },
+                    icon: const Icon(Icons.person, size: 18),
+                    label: const Text('Lihat Profil'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: MC.darkBrown,
+                      side: const BorderSide(color: MC.darkBrown),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                const SizedBox(width: 8),
+                Expanded(child: _buildConnectButton(context, ref)),
+              ],
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildConnectButton(BuildContext context, WidgetRef ref) {
+    final status = (member['connection_status'] ?? '').toString();
+    final peerId = (member['member_id'] ?? '').toString();
+    if (peerId.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    if (status == 'accepted') {
+      return OutlinedButton.icon(
+        onPressed: () async {
+          try {
+            await SupabaseApi.unfriendOrg5(peerId: peerId);
+            // Refresh lists + derived counts
+            await ref.read(membersProvider.notifier).refresh();
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('Koneksi diputuskan')));
+          } catch (e) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Gagal memutuskan: $e')));
+          }
+        },
+        icon: const Icon(Icons.link_off, size: 18),
+        label: const Text('Putuskan'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.red[700],
+          side: BorderSide(color: Colors.red[700]!),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      );
+    }
+    if (status == 'pending') {
+      return OutlinedButton.icon(
+        onPressed: null,
+        icon: const Icon(Icons.hourglass_empty, size: 18),
+        label: const Text('Menunggu'),
+      );
+    }
+    // Default: can send request
+    return FilledButton.icon(
+      onPressed: () async {
+        try {
+          await SupabaseApi.sendConnectionRequestOrg5(
+            addresseeId: peerId,
+            connectionType: 'friend',
+          );
+          await ref.read(membersProvider.notifier).refresh();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Permintaan koneksi dikirim')),
+          );
+        } catch (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Gagal mengirim permintaan: $e')),
+          );
+        }
+      },
+      icon: const Icon(Icons.person_add_alt, size: 18),
+      label: const Text('Koneksi'),
+      style: FilledButton.styleFrom(
+        backgroundColor: MC.darkBrown,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }

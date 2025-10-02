@@ -2,17 +2,28 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/services/mock_api.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/services/supabase_api.dart';
 
 final currentUserProvider = FutureProvider<Map<String, dynamic>>((ref) async {
-  return await MockApi.instance.getCurrentUser();
+  final uid = Supabase.instance.client.auth.currentUser?.id;
+  if (uid == null) return <String, dynamic>{};
+  final data = await SupabaseApi.getCustomerByMemberIdOrg5(memberId: uid);
+  return data ?? <String, dynamic>{};
 });
 
 final discountsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
-  return await MockApi.instance.getDiscounts();
+  return await SupabaseApi.getDiscountsOrg5(onlyActive: true, limit: 20);
 });
 
 final presenceProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
-  return await MockApi.instance.getPresence();
+  final uid = Supabase.instance.client.auth.currentUser?.id;
+  if (uid == null) return null;
+  try {
+    return await SupabaseApi.getCurrentPresence();
+  } catch (_) {
+    return null;
+  }
 });
 
 final membershipSummaryProvider = FutureProvider<Map<String, dynamic>>((ref) async {
@@ -43,4 +54,18 @@ final membershipSummaryProvider = FutureProvider<Map<String, dynamic>>((ref) asy
     // Keep key name for existing widget API; now it carries joinedAt value
     'validUntil': joinedAt,
   };
+});
+
+// Fetch locations for Org 5 (geofence), with fallback to mock when unauthenticated
+final locationsOrg5Provider =
+    FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  final uid = Supabase.instance.client.auth.currentUser?.id;
+  if (uid != null) {
+    try {
+      final list = await SupabaseApi.getLocationsOrg5();
+      if (list.isNotEmpty) return list;
+    } catch (_) {}
+  }
+  // Fallback to mock for dev/offline
+  return await MockApi.instance.getLocations();
 });

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/theme/theme.dart';
 import '../providers/profile_provider.dart';
+import '../../home/providers/home_providers.dart';
 
 class PersonalInfoWidget extends ConsumerStatefulWidget {
   const PersonalInfoWidget({super.key});
@@ -53,6 +54,22 @@ class _PersonalInfoWidgetState extends ConsumerState<PersonalInfoWidget> {
   @override
   Widget build(BuildContext context) {
     final notifier = ref.read(profileProvider.notifier);
+    final cu = ref.watch(currentUserProvider).maybeWhen(
+          data: (d) => d,
+          orElse: () => null,
+        );
+    String phoneDisplay = (cu?['phone_number'] ?? '').toString();
+    if (phoneDisplay.isNotEmpty) {
+      // Normalize simple: if digits and starts with '62' → '+62 ' + rest; if digits → '+' + number
+      final isDigits = RegExp(r'^\d+$').hasMatch(phoneDisplay);
+      if (isDigits && phoneDisplay.startsWith('62')) {
+        phoneDisplay = '+${phoneDisplay.substring(0, 2)} ${phoneDisplay.substring(2)}';
+      } else if (isDigits) {
+        phoneDisplay = '+$phoneDisplay';
+      }
+    } else {
+      phoneDisplay = '-';
+    }
 
     return Form(
       child: Column(
@@ -87,8 +104,10 @@ class _PersonalInfoWidgetState extends ConsumerState<PersonalInfoWidget> {
             },
           ),
           const SizedBox(height: 16),
+          // Read-only phone number from current user (customers.phone_number)
           TextFormField(
-            initialValue: '+62 812-3456-7890',
+            key: ValueKey(phoneDisplay),
+            initialValue: phoneDisplay,
             enabled: false,
             decoration: InputDecoration(
               labelText: 'Nomor Telepon',
@@ -121,9 +140,8 @@ class _PersonalInfoWidgetState extends ConsumerState<PersonalInfoWidget> {
                         : 'Pilih tanggal lahir',
                     style: TextStyle(
                       fontSize: 16,
-                      color: _selectedDate != null
-                          ? Colors.black87
-                          : Colors.grey,
+                      color:
+                          _selectedDate != null ? Colors.black87 : Colors.grey,
                     ),
                   ),
                   const Icon(Icons.arrow_drop_down),
@@ -145,9 +163,10 @@ class _PersonalInfoWidgetState extends ConsumerState<PersonalInfoWidget> {
             ),
             hint: const Text('Pilih jenis kelamin'),
             isExpanded: true,
-            items: _genderOptions.map((String value) {
-              return DropdownMenuItem<String>(value: value, child: Text(value));
-            }).toList(),
+            items: _genderOptions
+                .map((String value) =>
+                    DropdownMenuItem<String>(value: value, child: Text(value)))
+                .toList(),
             onChanged: (newValue) {
               setState(() {
                 _selectedGender = newValue;
@@ -160,3 +179,4 @@ class _PersonalInfoWidgetState extends ConsumerState<PersonalInfoWidget> {
     );
   }
 }
+

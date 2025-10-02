@@ -1,6 +1,47 @@
 // lib/features/connect/providers/members_provider.dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/services/mock_api.dart';
+import '../../../core/services/supabase_api.dart';
+
+// Local query model to avoid coupling with mock API
+class MembersQuery {
+  final String tab; // 'nearest' | 'network'
+  final String status; // 'Semua' | 'Online' | 'Friends' | 'Partners'
+  final String search;
+  final int page;
+  final int pageSize;
+  final int? locationId; // optional
+  final double? radiusKm; // optional
+
+  const MembersQuery({
+    this.tab = 'nearest',
+    this.status = 'Semua',
+    this.search = '',
+    this.page = 1,
+    this.pageSize = 10,
+    this.locationId,
+    this.radiusKm,
+  });
+
+  MembersQuery copyWith({
+    String? tab,
+    String? status,
+    String? search,
+    int? page,
+    int? pageSize,
+    int? locationId,
+    double? radiusKm,
+  }) {
+    return MembersQuery(
+      tab: tab ?? this.tab,
+      status: status ?? this.status,
+      search: search ?? this.search,
+      page: page ?? this.page,
+      pageSize: pageSize ?? this.pageSize,
+      locationId: locationId ?? this.locationId,
+      radiusKm: radiusKm ?? this.radiusKm,
+    );
+  }
+}
 
 class MembersState {
   final List<Map<String, dynamic>> members;
@@ -57,13 +98,20 @@ class MembersNotifier extends Notifier<MembersState> {
 
   Future<void> refresh() async {
     state = state.copyWith(isLoading: true, query: state.query.copyWith(page: 1));
-    final result = await MockApi.instance.getMembers(state.query);
-    final stats = _computeStats(result.items, state.query);
+    final result = await SupabaseApi.getMembersOrg5(
+      tab: state.query.tab,
+      status: state.query.status,
+      search: state.query.search,
+      page: 1,
+      pageSize: state.query.pageSize,
+    );
+    final items = List<Map<String, dynamic>>.from(result['items'] ?? const []);
+    final stats = _computeStats(items, state.query);
     state = state.copyWith(
-      members: result.items,
+      members: items,
       isLoading: false,
-      total: result.total,
-      hasMore: result.hasMore,
+      total: (result['total'] as int?) ?? items.length,
+      hasMore: (result['hasMore'] as bool?) ?? false,
       onlineCount: stats.$1,
       nearbyCount: stats.$2,
     );
@@ -73,14 +121,21 @@ class MembersNotifier extends Notifier<MembersState> {
     if (state.isLoadingMore || !state.hasMore) return;
     state = state.copyWith(isLoadingMore: true);
     final nextQuery = state.query.copyWith(page: state.query.page + 1);
-    final result = await MockApi.instance.getMembers(nextQuery);
-    final stats = _computeStats([...state.members, ...result.items], nextQuery);
+    final result = await SupabaseApi.getMembersOrg5(
+      tab: nextQuery.tab,
+      status: nextQuery.status,
+      search: nextQuery.search,
+      page: nextQuery.page,
+      pageSize: nextQuery.pageSize,
+    );
+    final items = List<Map<String, dynamic>>.from(result['items'] ?? const []);
+    final stats = _computeStats([...state.members, ...items], nextQuery);
     state = state.copyWith(
-      members: [...state.members, ...result.items],
+      members: [...state.members, ...items],
       isLoadingMore: false,
       query: nextQuery,
-      total: result.total,
-      hasMore: result.hasMore,
+      total: (result['total'] as int?) ?? (state.members.length + items.length),
+      hasMore: (result['hasMore'] as bool?) ?? false,
       onlineCount: stats.$1,
       nearbyCount: stats.$2,
     );

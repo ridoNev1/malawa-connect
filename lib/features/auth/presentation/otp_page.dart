@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/theme.dart';
 import '../../../shared/widgets/widgets.dart';
+import '../../../core/services/supabase_api.dart';
 import '../providers.dart';
 
 class OtpPage extends ConsumerStatefulWidget {
@@ -39,6 +40,13 @@ class _S extends ConsumerState<OtpPage> {
       await ref
           .read(authRepoProvider)
           .verifyOtp(phone: '+62${widget.phone}', token: _token);
+      // After OTP success, upsert/attach customer to org 5 using RPC
+      try {
+        final phone62 = '62${widget.phone}';
+        await SupabaseApi.syncCustomerLoginOrg5(phone62: phone62);
+      } catch (_) {
+        // Silent fail; user can still proceed, provider will try to load later
+      }
       if (!mounted) return;
       context.go('/');
     } catch (e) {

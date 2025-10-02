@@ -2,11 +2,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/theme.dart';
 import '../../../shared/widgets/bottom_navigation.dart';
 import '../../../shared/widgets/logout_dialog.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/profile_header_widget.dart';
+import '../../home/providers/home_providers.dart';
+import '../../home/providers/presence_controller.dart';
 import '../widgets/personal_info_widget.dart';
 import '../widgets/preference_widget.dart';
 import '../widgets/interests_widget.dart';
@@ -28,10 +31,17 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   Future<void> _logout(BuildContext context) async {
     try {
-      await Future.delayed(const Duration(seconds: 1));
-      if (context.mounted) {
-        context.go('/login');
-      }
+      // Stop heartbeat if running
+      ref.read(presenceControllerProvider.notifier).stopHeartbeat();
+      // Sign out Supabase session
+      await Supabase.instance.client.auth.signOut(scope: SignOutScope.global);
+      // Invalidate key providers
+      ref.invalidate(currentUserProvider);
+      ref.invalidate(membershipSummaryProvider);
+      ref.invalidate(presenceProvider);
+      ref.invalidate(locationsOrg5Provider);
+      // Let router redirect based on auth state; go to root to trigger redirect
+      if (context.mounted) context.go('/');
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -75,9 +85,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         ],
       ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
+        child: RefreshIndicator(
+          onRefresh: () async {
+            // Refresh profile + current user data from Supabase
+            ref.invalidate(currentUserProvider);
+            await ref.refresh(currentUserProvider.future);
+            await ref.read(profileProvider.notifier).loadUserData();
+          },
+          color: MC.accentOrange,
+          backgroundColor: Colors.white,
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
             const ProfileHeaderWidget(isEditable: true),
             const SizedBox(height: 32),
             const PersonalInfoWidget(),
@@ -118,7 +137,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               ),
             ),
             const SizedBox(height: 100),
-          ],
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: AppBottomNavigation(

@@ -1,12 +1,14 @@
 // lib/features/profile/widgets/profile_header_widget.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:malawa_connect/core/services/mock_api.dart';
 import '../../../core/theme/theme.dart';
 import '../providers/profile_provider.dart';
-import '../../../core/services/mock_api.dart';
+import '../../../core/services/supabase_api.dart';
 import '../../home/providers/home_providers.dart';
 import '../../connect/providers/member_detail_provider.dart';
 
@@ -185,48 +187,96 @@ class ProfileHeaderWidget extends ConsumerWidget {
         const SizedBox(height: 4),
         // Online indicator (current user uses presenceProvider; other user uses memberByIdProvider)
         if (isEditable)
-          Consumer(builder: (context, ref, _) {
-            return ref.watch(presenceProvider).when(
-                  data: (presence) {
-                    final online = presence != null;
-                    final label = online
-                        ? 'Online di ${presence['location_name'] ?? '-'}'
-                        : 'Terakhir mengunjungi cafe';
-                    return _OnlineBadge(online: online, label: label);
-                  },
-                  loading: () => const SizedBox.shrink(),
-                  error: (e, st) => const SizedBox.shrink(),
-                );
-          })
+          Consumer(
+            builder: (context, ref, _) {
+              return ref
+                  .watch(presenceProvider)
+                  .when(
+                    data: (presence) {
+                      final online = presence != null;
+                      if (online) {
+                        final label =
+                            'Online di ${presence['location_name'] ?? '-'}';
+                        return _OnlineBadge(online: true, label: label);
+                      }
+                      // Offline: show last visit time from currentUserProvider if available
+                      final cu = ref
+                          .watch(currentUserProvider)
+                          .maybeWhen(data: (d) => d, orElse: () => null);
+                      String label = 'Terakhir mengunjungi cafe';
+                      final iso = cu?['last_visit_at']?.toString();
+                      final dt = iso != null ? DateTime.tryParse(iso) : null;
+                      if (dt != null) {
+                        final formatted = DateFormat(
+                          'dd MMM yyyy HH:mm',
+                        ).format(dt.toLocal());
+                        label = 'Terakhir mengunjungi cafe $formatted';
+                      }
+                      return _OnlineBadge(online: false, label: label);
+                    },
+                    loading: () => const SizedBox.shrink(),
+                    error: (e, st) => const SizedBox.shrink(),
+                  );
+            },
+          )
         else if (userId != null)
-          Consumer(builder: (context, ref, _) {
-            final memberAsync = ref.watch(memberByIdProvider(userId!));
-            final locsAsync = ref.watch(profileLocationsProvider);
-            return memberAsync.when(
-              data: (m) {
-                final online = (m?['isOnline'] as bool?) == true;
-                String label;
-                if (online) {
-                  String locName = '-';
-                  final locId = m?['location_id'] as int?;
-                  if (locsAsync.hasValue) {
-                    final locs = locsAsync.value!;
-                    final found = locs.firstWhere(
-                      (e) => e['id'] == locId,
-                      orElse: () => {},
-                    );
-                    if (found.isNotEmpty) locName = (found['name'] ?? '-').toString();
+          Consumer(
+            builder: (context, ref, _) {
+              final memberAsync = ref.watch(memberByIdProvider(userId!));
+              final locsAsync = ref.watch(profileLocationsProvider);
+              return memberAsync.when(
+                data: (m) {
+                  final online = (m?['isOnline'] as bool?) == true;
+                  String label;
+                  if (online) {
+                    // Prefer location_name from RPC; fallback to local lookup by id
+                    String locName = (m?['location_name'] ?? '').toString();
+                    if (locName.isEmpty) {
+                      final locId = m?['location_id'] as int?;
+                      if (locsAsync.hasValue) {
+                        final locs = locsAsync.value!;
+                        final found = locs.firstWhere(
+                          (e) => e['id'] == locId,
+                          orElse: () => {},
+                        );
+                        if (found.isNotEmpty)
+                          locName = (found['name'] ?? '-').toString();
+                      }
+                    }
+                    if (locName.isEmpty) locName = '-';
+                    label = 'Online di $locName';
+                  } else {
+                    String rel = '-';
+                    final iso = m?['lastSeen']?.toString();
+                    if (iso != null && iso.isNotEmpty) {
+                      try {
+                        final dt = DateTime.parse(iso).toLocal();
+                        final now = DateTime.now();
+                        final diff = now.difference(dt);
+                        if (diff.inSeconds < 60) rel = 'Baru saja';
+                        else if (diff.inMinutes < 60) rel = '${diff.inMinutes} menit yang lalu';
+                        else if (diff.inHours < 24) rel = '${diff.inHours} jam yang lalu';
+                        else if (diff.inDays < 7) rel = '${diff.inDays} hari yang lalu';
+                        else {
+                          final weeks = (diff.inDays / 7).floor();
+                          if (weeks < 5) rel = '$weeks minggu yang lalu';
+                          else {
+                            final months = (diff.inDays / 30).floor();
+                            if (months < 12) rel = '$months bulan yang lalu';
+                            else rel = '${(diff.inDays / 365).floor()} tahun yang lalu';
+                          }
+                        }
+                      } catch (_) {}
+                    }
+                    label = 'Terakhir mengunjungi cafe $rel';
                   }
-                  label = 'Online di $locName';
-                } else {
-                  label = 'Terakhir mengunjungi cafe ${m?['lastSeen'] ?? '-'}';
-                }
-                return _OnlineBadge(online: online, label: label);
-              },
-              loading: () => const SizedBox.shrink(),
-              error: (e, st) => const SizedBox.shrink(),
-            );
-          })
+                  return _OnlineBadge(online: online, label: label);
+                },
+                loading: () => const SizedBox.shrink(),
+                error: (e, st) => const SizedBox.shrink(),
+              );
+            },
+          )
         else
           const SizedBox.shrink(),
 
@@ -316,7 +366,11 @@ class ProfileHeaderWidget extends ConsumerWidget {
           if (userId != null) {
             if (MockApi.instance.isBlocked(userId!)) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Tidak bisa mengirim pesan ke user yang diblokir')),
+                const SnackBar(
+                  content: Text(
+                    'Tidak bisa mengirim pesan ke user yang diblokir',
+                  ),
+                ),
               );
             } else {
               _openChat(context, userId!);
@@ -411,9 +465,15 @@ class _OnlineBadge extends StatelessWidget {
   }
 }
 
-final profileLocationsProvider =
-    FutureProvider<List<Map<String, dynamic>>>((ref) async {
-  return await MockApi.instance.getLocations();
+final profileLocationsProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
+  try {
+    final list = await SupabaseApi.getLocationsOrg5();
+    return list;
+  } catch (_) {
+    return const <Map<String, dynamic>>[];
+  }
 });
 
 // Full screen profile image page

@@ -1,0 +1,175 @@
+-- Patch: Fix lastSeen handling for members and member detail (Org 5)
+-- - Avoid epoch fallback (1970-01-01)
+-- - Use presence timestamps when active; otherwise use customers.last_visit_at (if available)
+
+-- A) get_members_org5: lastSeen from presence; fallback to customers.last_visit_at; otherwise NULL
+CREATE OR REPLACE FUNCTION public.get_members_org5(
+  p_tab text DEFAULT 'nearest',
+  p_status text DEFAULT 'Semua',
+  p_search text DEFAULT '',
+  p_page int DEFAULT 1,
+  p_page_size int DEFAULT 10,
+  p_base_location_id bigint DEFAULT NULL
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_offset int := GREATEST((COALESCE(p_page,1)-1) * COALESCE(p_page_size,10), 0);
+  v_items jsonb;
+  v_base_loc bigint := p_base_location_id;
+BEGIN
+  IF p_tab = 'nearest' AND v_base_loc IS NULL THEN
+    SELECT location_id INTO v_base_loc FROM public.customers
+    WHERE member_id = v_uid AND organization_id = 5;
+  END IF;
+
+  WITH base AS (
+    SELECT c.id::text AS id,
+           c.member_id,
+           c.location_id,
+           c.full_name AS name,
+           c.profile_image_url AS avatar,
+           c.preference,
+           c.gallery_images,
+           c.date_of_birth,
+           c.gender,
+           c.interests,
+           c.last_visit_at
+    FROM public.customers c
+    WHERE c.organization_id = 5
+      AND c.member_id <> v_uid
+      AND (COALESCE(p_search,'') = '' OR c.full_name ILIKE '%'||p_search||'%')
+      AND (p_tab <> 'nearest' OR (v_base_loc IS NOT NULL AND c.location_id = v_base_loc))
+      AND NOT EXISTS (
+        SELECT 1 FROM public.blocked_users b
+        WHERE b.organization_id = 5
+          AND ((b.blocker_id = v_uid AND b.blocked_id = c.member_id)
+            OR (b.blocker_id = c.member_id AND b.blocked_id = v_uid))
+      )
+  ),
+  pres AS (
+    SELECT up.user_id,
+           up.last_heartbeat_at,
+           up.check_in_at
+    FROM public.user_presence up
+    WHERE up.check_out_at IS NULL
+  ),
+  joined AS (
+    SELECT b.*,
+           (p.user_id IS NOT NULL AND p.last_heartbeat_at >= now() - interval '120 seconds') AS "isOnline",
+           CASE
+             WHEN p.user_id IS NOT NULL
+               THEN to_char(COALESCE(p.last_heartbeat_at, p.check_in_at), 'YYYY-MM-DD"T"HH24:MI:SSZ')
+             WHEN b.last_visit_at IS NOT NULL
+               THEN to_char(b.last_visit_at, 'YYYY-MM-DD"T"HH24:MI:SSZ')
+             ELSE NULL
+           END AS "lastSeen",
+           '-'::text AS distance
+    FROM base b
+    LEFT JOIN pres p ON p.user_id = b.member_id
+  ),
+  conns AS (
+    SELECT CASE WHEN c.requester_id = v_uid THEN c.addressee_id ELSE c.requester_id END AS peer_id,
+           c.connection_type,
+           c.status
+    FROM public.connections c
+    WHERE c.organization_id = 5
+      AND (c.requester_id = v_uid OR c.addressee_id = v_uid)
+  ),
+  filtered AS (
+    SELECT j.*, cc.status as connection_status, cc.connection_type as connection_type
+    FROM joined j
+    LEFT JOIN conns cc ON cc.peer_id = j.member_id
+    WHERE (
+      p_status IS NULL OR p_status = 'Semua'
+      OR (p_status = 'Online'   AND j."isOnline" = true)
+      OR (p_status = 'Friends'  AND cc.status = 'accepted' AND cc.connection_type = 'friend')
+      OR (p_status = 'Partners' AND cc.status = 'accepted' AND cc.connection_type = 'partner')
+    )
+  ),
+  counted AS (
+    SELECT COUNT(*) AS total FROM filtered
+  ),
+  page AS (
+    SELECT * FROM filtered
+    ORDER BY "isOnline" DESC, name ASC
+    OFFSET v_offset LIMIT COALESCE(p_page_size,10)
+  )
+  SELECT jsonb_build_object(
+    'items', COALESCE(jsonb_agg(to_jsonb(page)), '[]'::jsonb),
+    'page', COALESCE(p_page,1),
+    'pageSize', COALESCE(p_page_size,10),
+    'total', (SELECT total FROM counted),
+    'hasMore', ((SELECT total FROM counted) > (v_offset + COALESCE(p_page_size,10)))
+  ) INTO v_items
+  FROM page;
+
+  RETURN COALESCE(v_items, jsonb_build_object(
+    'items','[]'::jsonb,'page',COALESCE(p_page,1),'pageSize',COALESCE(p_page_size,10),'total',0,'hasMore',false
+  ));
+END;
+$$;
+
+ALTER FUNCTION public.get_members_org5(text, text, text, int, int, bigint) OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION public.get_members_org5(text, text, text, int, int, bigint) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_members_org5(text, text, text, int, int, bigint) TO service_role;
+
+-- B) get_member_detail_org5: lastSeen from presence; fallback to customers.last_visit_at; otherwise NULL
+CREATE OR REPLACE FUNCTION public.get_member_detail_org5(
+  p_id text
+) RETURNS jsonb
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  WITH base AS (
+    SELECT c.id::text AS id,
+           c.member_id,
+           c.location_id,
+           c.full_name AS name,
+           c.profile_image_url AS avatar,
+           c.preference,
+           c.gallery_images,
+           c.date_of_birth,
+           c.gender,
+           c.interests,
+           c.last_visit_at
+    FROM public.customers c
+    WHERE c.organization_id = 5
+      AND (c.id::text = p_id OR c.member_id::text = p_id)
+  ), pres AS (
+    SELECT up.user_id,
+           up.last_heartbeat_at,
+           up.check_in_at
+    FROM public.user_presence up
+    WHERE up.check_out_at IS NULL
+  ), loc AS (
+    SELECT l.id, l.name FROM public.locations l WHERE l.organization_id = 5
+  )
+  SELECT to_jsonb(j) FROM (
+    SELECT b.*,
+      loc.name AS location_name,
+      (p.user_id IS NOT NULL AND p.last_heartbeat_at >= now() - interval '120 seconds') AS "isOnline",
+      CASE
+        WHEN p.user_id IS NOT NULL
+          THEN to_char(COALESCE(p.last_heartbeat_at, p.check_in_at), 'YYYY-MM-DD"T"HH24:MI:SSZ')
+        WHEN b.last_visit_at IS NOT NULL
+          THEN to_char(b.last_visit_at, 'YYYY-MM-DD"T"HH24:MI:SSZ')
+        ELSE NULL
+      END AS "lastSeen"
+    FROM base b
+    LEFT JOIN pres p ON p.user_id = b.member_id
+    LEFT JOIN loc  ON loc.id = b.location_id
+  ) j;
+$$;
+
+ALTER FUNCTION public.get_member_detail_org5(text) OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION public.get_member_detail_org5(text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_member_detail_org5(text) TO service_role;
+
+-- Refresh PostgREST schema cache (optional)
+NOTIFY pgrst, 'reload schema';
+

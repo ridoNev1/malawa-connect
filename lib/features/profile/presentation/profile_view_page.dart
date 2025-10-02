@@ -1,5 +1,7 @@
 // lib/features/profile/pages/profile_view_page.dart
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import '../../connect/providers/member_detail_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/theme.dart';
@@ -166,6 +168,40 @@ class _ProfileViewPageState extends ConsumerState<ProfileViewPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading: const Icon(Icons.bug_report_outlined),
+              title: const Text('Debug: Tampilkan Data'),
+              onTap: () async {
+                Navigator.pop(context);
+                try {
+                  final data = await ref
+                      .read(memberByIdProvider(widget.userId).future);
+                  final pretty = const JsonEncoder.withIndent('  ')
+                      .convert(data ?? {});
+                  // ignore: use_build_context_synchronously
+                  showDialog(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Member Detail (Debug)'),
+                      content: SingleChildScrollView(
+                        child: Text(pretty),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(),
+                          child: const Text('Tutup'),
+                        ),
+                      ],
+                    ),
+                  );
+                } catch (e) {
+                  // ignore: use_build_context_synchronously
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Gagal memuat debug: $e')),
+                  );
+                }
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.block),
               title: const Text('Blokir User'),
