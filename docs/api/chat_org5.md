@@ -3,6 +3,7 @@
 Status
 - Designed for realtime without Postgres Changes or DB extension: uses Realtime Channels (client broadcast).
 - DB is source of truth via RPC; client broadcasts carry deltas for instant UI.
+- Header now returns presence-based location name; list shows placeholder for image messages.
 
 Schema
 - Tables
@@ -31,11 +32,15 @@ Realtime Design (Channels)
 RPC
 - `get_or_create_direct_chat_org5(peer_id)` → `chat_rooms`
 - `get_chat_list_org5(search?, limit=20, offset=0)` → TABLE(id, name, avatar, lastMessage, lastMessageTime, unreadCount, isOnline)
-- `get_room_header_org5(chat_id)` → JSONB(id, name, avatar, peer_id, isOnline, lastSeen)
+  - DB sets `last_message_text='[image]'` saat pesan gambar; FE memetakan ke label UI “Mengirim gambar”.
+- `get_room_header_org5(chat_id)` → JSONB(id, name, avatar, peer_id, isOnline, lastSeen, locationId?, locationName?)
+  - `locationName` diturunkan dari presence aktif (fallback last presence → customers.location_id)
 - `get_messages_org5(chat_id, limit=50, before?)` → TABLE(id, text, isImage, imageUrl, created_at, isMine)
+  - Catatan: beberapa driver mengembalikan kunci lower-case `imageurl/ismine`; FE menormalkan dan menandatangani URL gambar via Storage `createSignedUrl`.
 - `send_message_org5(chat_id, text, is_image=false, image_url?, client_id?)` → `chat_messages`
   - Inserts message, updates `chat_rooms.last_message_*`, increments `unread_count` for other participants
   - Client broadcasts the `message` and `chat_update` events after success
+  - DB juga menyisipkan notifikasi `newMessage` untuk participant lain pada `public.notifications`.
 - `mark_read_org5(chat_id)` → int
   - Upserts `chat_read_state` and sets `chat_participants.unread_count=0` for current user
   - Broadcasts `room:<chat_id>` event `read` with payload `{ chat_id, user_id, last_read_at }`
@@ -59,3 +64,4 @@ Security
 Notes
 - DB presence (online) is derived from `user_presence` TTL 120s, as in presence RPCs.
 - This design works without enabling Postgres Changes replication or DB extensions; realtime is delivered via client Channels. Images stored in private bucket `chatimages` use signed URLs on render.
+ - FE melakukan normalisasi key (camelCase) dan deduplikasi broadcast berdasarkan `id` pesan untuk menghindari duplikasi optimis.

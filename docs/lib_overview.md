@@ -29,11 +29,15 @@ Each folder under `lib/features` owns a vertical slice: presentation widgets, st
 
 - **Auth (`lib/features/auth`)**: Screens for login and OTP verification drive Supabase-based authentication before handing off to the home experience.
 - **Home (`lib/features/home`)**: Providers aggregate current user, membership, discounts, presence, and notification badge information. Presentation code renders the dashboard, membership card, and live presence duration, and wires geofence triggers through the presence controller.
-- **Connect (`lib/features/connect`)**: `MembersNotifier` orchestrates tab switching, filters, debounced search, pagination, and derived statistics for the member directory. UI widgets render nearest/network tabs, filter chips, and list items that respond to provider state.
+- **Connect (`lib/features/connect`)**: `MembersNotifier` orchestrates tab switching, filters, debounced search, pagination, and derived statistics for the member directory. DB `get_members_org5` kini menambahkan fallback lokasi dari presence terakhir (bila `customers.location_id` kosong) dan deduplikasi koneksi. UI MemberCard menampilkan ikon gender yang tepat dan dot “in‑app active” (Realtime broadcast) pada avatar.
 - **Profile (`lib/features/profile`)**: Providers fetch either the current user or another member, expose actions for updating profile data, blocking, and reporting, and drive gallery/online indicator widgets for both edit and view modes.
-- **Chat (`lib/features/chat`)**: Chat list and room providers fetch paginated messages, mark conversations as read, and relay send-message actions back to the mock API. Presentation files compose the chat list, room timeline, and message composer widgets while honoring online presence metadata.
-- **Notifications (`lib/features/notifications`)**: Riverpod state manages notification fetching, pull-to-refresh, mark-all, and connection request actions through Supabase RPCs + polling fallback. Pages render grouped cards and update the global unread badge that surfaces on the home header.
+- **Chat (`lib/features/chat`)**: Chat list and room providers terhubung RPC Supabase; menampilkan placeholder `[image]` pada list untuk pesan gambar (dipetakan UI menjadi “Mengirim gambar”). Room merender gambar via signed URL dari bucket privat `chatimages`. Header room mengandalkan `get_room_header_org5` (peer_id, lokasi presence, status online). Broadcast Realtime digunakan untuk update instan.
+- **Notifications (`lib/features/notifications`)**: Riverpod state manages notification fetching, pull-to-refresh, mark-all, dan actions. Mendengarkan Realtime postgres_changes untuk INSERT pada `public.notifications`, serta menampilkan `newMessage`. Foreground local notifications (in‑app) menggunakan `flutter_local_notifications` saat adanya notifikasi baru.
 
 ## Relationship to Mock Documentation
 
-Legacy docs (`features_summary.md`, `moc_fe.md`) described a fully mocked stack. The codebase has transitioned to Supabase for auth, profile, presence/geofence, locations, discounts, connections, and notifications. The Mock API remains only for chat demo and a few dev fallbacks as noted above.
+Legacy docs (`features_summary.md`, `moc_fe.md`) described a fully mocked stack. The codebase has transitioned to Supabase for auth, profile, presence/geofence, locations, discounts, connections, chat, and notifications. Mock API tersisa hanya untuk aksi block/report (sementara) dan beberapa fallback dev.
+
+## In‑App Presence (Avatar‑only)
+- Realtime Channels: channel `'app:presence:org5'` digunakan untuk broadcast `{ uid }` setiap 10 detik saat app aktif. FE menyimpan `activeUids` dengan TTL ~20 detik.
+- Dot avatar (hijau/abu‑abu) hanya merefleksikan “app sedang dibuka”, terpisah dari status online berdasarkan geofence/presence TTL.
