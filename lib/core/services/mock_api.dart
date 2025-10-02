@@ -2,7 +2,6 @@
 // Single source of truth for all mock data and actions.
 // Centralized to ease BE integration later (e.g., Supabase).
 
-import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 class PaginatedResult<T> {
@@ -149,30 +148,7 @@ class MockApi {
     },
   ];
 
-  // Discounts
-  final List<Map<String, dynamic>> _discounts = [
-    {
-      'id': 8,
-      'name': 'Open Diskon',
-      'description': '',
-      'type': 'percentage',
-      'value': 20,
-      'is_active': true,
-      'created_at': '2025-09-30T13:34:29.773957+00:00',
-      'unique_code': 'OPENING20',
-      'organization_id': 5,
-      'image': null,
-      'valid_until': '2025-12-31',
-    },
-  ];
-
-  // Presence mock
-  Map<String, dynamic>? _presence = {
-    'location_id': 7,
-    'location_name': 'Malawa Atrium',
-    'check_in_time': DateTime.now().toIso8601String(),
-    'last_heartbeat_at': DateTime.now().toIso8601String(),
-  };
+  // Presence mock for other members is kept in _memberPresence below
 
   // Members (Connect) and Profiles
   final List<Map<String, dynamic>> _members = [
@@ -411,78 +387,9 @@ class MockApi {
     ],
   };
 
-  // Notifications (mock)
-  final List<Map<String, dynamic>> _notifications = [
-    {
-      'id': '1',
-      'type': 'newMessage',
-      'title': 'Pesan Baru',
-      'message': 'Halo, apakah kita bisa bertemu di cafe nanti?',
-      'senderId': '1',
-      'senderName': 'Michael Chen',
-      'senderAvatar': 'https://randomuser.me/api/portraits/men/32.jpg',
-      'timestamp': DateTime.now()
-          .subtract(const Duration(minutes: 5))
-          .toIso8601String(),
-      'isRead': false,
-      'requiresAction': false,
-    },
-    {
-      'id': '2',
-      'type': 'connectionRequest',
-      'title': 'Permintaan Koneksi',
-      'message': 'Sarah Johnson ingin terhubung dengan Anda',
-      'senderId': '2',
-      'senderName': 'Sarah Johnson',
-      'senderAvatar': 'https://randomuser.me/api/portraits/women/44.jpg',
-      'timestamp': DateTime.now()
-          .subtract(const Duration(hours: 2))
-          .toIso8601String(),
-      'isRead': false,
-      'requiresAction': true,
-    },
-    {
-      'id': '3',
-      'type': 'connectionRequest',
-      'title': 'Permintaan Koneksi',
-      'message': 'David Wilson ingin terhubung dengan Anda',
-      'senderId': '3',
-      'senderName': 'David Wilson',
-      'senderAvatar': 'https://randomuser.me/api/portraits/men/36.jpg',
-      'timestamp': DateTime.now()
-          .subtract(const Duration(hours: 5))
-          .toIso8601String(),
-      'isRead': false,
-      'requiresAction': true,
-    },
-    {
-      'id': '4',
-      'type': 'connectionAccepted',
-      'title': 'Koneksi Diterima',
-      'message': 'Emma Wilson telah menerima permintaan koneksi Anda',
-      'senderId': '4',
-      'senderName': 'Emma Wilson',
-      'senderAvatar': 'https://randomuser.me/api/portraits/women/65.jpg',
-      'timestamp': DateTime.now()
-          .subtract(const Duration(days: 1))
-          .toIso8601String(),
-      'isRead': true,
-      'requiresAction': false,
-    },
-  ];
+  // Notifications mock removed (app uses Supabase notifications)
 
-  // --- GET endpoints ---
-  Future<Map<String, dynamic>> getCurrentUser() async {
-    await Future.delayed(const Duration(milliseconds: 200));
-    // Initialize member presences on first call (set last_heartbeat_at to now)
-    for (final entry in _memberPresence.entries) {
-      if (entry.value['last_heartbeat_at'] == 'INIT') {
-        entry.value['last_heartbeat_at'] = DateTime.now().toIso8601String();
-        entry.value['check_in_time'] = DateTime.now().toIso8601String();
-      }
-    }
-    return Map<String, dynamic>.from(currentUser);
-  }
+  // --- GET endpoints (subset kept for fallbacks + chat demo) ---
 
   Future<List<Map<String, dynamic>>> getLocations({String? search}) async {
     await Future.delayed(const Duration(milliseconds: 200));
@@ -500,124 +407,7 @@ class MockApi {
     return list;
   }
 
-  Future<List<Map<String, dynamic>>> getDiscounts({String? search}) async {
-    await Future.delayed(const Duration(milliseconds: 200));
-    var list = List<Map<String, dynamic>>.from(_discounts);
-    if (search != null && search.trim().isNotEmpty) {
-      final q = search.toLowerCase();
-      list = list
-          .where((e) => e['name'].toString().toLowerCase().contains(q))
-          .toList();
-    }
-    return list;
-  }
-
-  Future<Map<String, dynamic>?> getPresence() async {
-    await Future.delayed(const Duration(milliseconds: 200));
-    return _presence == null ? null : Map<String, dynamic>.from(_presence!);
-  }
-
-  Future<void> heartbeat() async {
-    await Future.delayed(const Duration(milliseconds: 80));
-    if (_presence != null) {
-      _presence!['last_heartbeat_at'] = DateTime.now().toIso8601String();
-    }
-    debugPrint('[MockApi] heartbeat payload: {}');
-  }
-
-  Future<PaginatedResult<Map<String, dynamic>>> getMembers(
-    MembersQuery query,
-  ) async {
-    await Future.delayed(const Duration(milliseconds: 350));
-
-    List<Map<String, dynamic>> list = List<Map<String, dynamic>>.from(_members);
-
-    // Filter blocked by current user
-    list = list.where((m) {
-      final id = m['id'].toString();
-      final mid = (m['member_id'] ?? '').toString();
-      return !_blockedIds.contains(id) && !_blockedIds.contains(mid);
-    }).toList();
-
-    // Compute online via TTL presence; if online, override location_id
-    list = list.map((m) {
-      final id = m['id'].toString();
-      final updated = {...m};
-      final pres = _memberPresence[id];
-      if (pres != null) {
-        final last = DateTime.tryParse(pres['last_heartbeat_at'] ?? '');
-        final online =
-            last != null &&
-            DateTime.now().difference(last).inSeconds <= presenceTtlSeconds;
-        updated['isOnline'] = online;
-        if (online) {
-          updated['location_id'] = pres['location_id'];
-        }
-      } else {
-        updated['isOnline'] = false;
-      }
-      return updated;
-    }).toList();
-
-    // Tab: nearest -> base on presence location or currentUser.location_id
-    if (query.tab.toLowerCase() == 'nearest') {
-      final presence = await getPresence();
-      final baseLocId = presence != null
-          ? presence['location_id'] as int?
-          : (currentUser['location_id'] as int?);
-      if (baseLocId != null) {
-        list = list.where((e) => e['location_id'] == baseLocId).toList();
-      }
-    }
-
-    // Status filter
-    switch (query.status) {
-      case 'Online':
-        list = list.where((m) => (m['isOnline'] as bool?) == true).toList();
-        break;
-      case 'Friends':
-        list = list.where((m) => (m['isConnected'] as bool?) == true).toList();
-        break;
-      case 'Partners':
-        list = list
-            .where(
-              (m) => (m['preference'] ?? '').toString().contains('Partners'),
-            )
-            .toList();
-        break;
-      default:
-        break;
-    }
-
-    // Search
-    if (query.search.trim().isNotEmpty) {
-      final q = query.search.toLowerCase();
-      list = list.where((m) {
-        final name = (m['name'] as String).toLowerCase();
-        final interests = (m['interests'] as List<dynamic>)
-            .map((i) => i.toString().toLowerCase())
-            .join(' ');
-        return name.contains(q) || interests.contains(q);
-      }).toList();
-    }
-
-    // Pagination
-    final total = list.length;
-    final start = (query.page - 1) * query.pageSize;
-    final end = min(start + query.pageSize, total);
-    final items = (start < total)
-        ? list.sublist(start, end)
-        : <Map<String, dynamic>>[];
-    final hasMore = end < total;
-
-    return PaginatedResult(
-      items: items,
-      page: query.page,
-      pageSize: query.pageSize,
-      total: total,
-      hasMore: hasMore,
-    );
-  }
+  // removed: getMembers/getPresence/discounts — Connect & Home now use Supabase
 
   Future<Map<String, dynamic>?> getMemberById(String userId) async {
     await Future.delayed(const Duration(milliseconds: 250));
@@ -781,36 +571,7 @@ class MockApi {
     return newChat;
   }
 
-  // --- Action endpoints (prints payloads) ---
-  Future<void> sendFriendRequest({
-    required String toUserId,
-    String? message,
-  }) async {
-    await Future.delayed(const Duration(milliseconds: 250));
-    debugPrint(
-      '[MockApi] sendFriendRequest payload: {toUserId: $toUserId, message: $message}',
-    );
-  }
-
-  Future<void> acceptFriendRequest({required String requestId}) async {
-    await Future.delayed(const Duration(milliseconds: 200));
-    debugPrint(
-      '[MockApi] acceptFriendRequest payload: {requestId: $requestId}',
-    );
-  }
-
-  Future<void> declineFriendRequest({required String requestId}) async {
-    await Future.delayed(const Duration(milliseconds: 200));
-    debugPrint(
-      '[MockApi] declineFriendRequest payload: {requestId: $requestId}',
-    );
-  }
-
-  Future<void> unfriend({required String userId}) async {
-    await Future.delayed(const Duration(milliseconds: 200));
-    debugPrint('[MockApi] unfriend payload: {userId: $userId}');
-  }
-
+  // --- Action endpoints (subset kept for profile/chat demo) ---
   Future<void> blockUser({required String userId, String? reason}) async {
     await Future.delayed(const Duration(milliseconds: 200));
     // Store both forms if resolvable
@@ -832,53 +593,9 @@ class MockApi {
     );
   }
 
-  Future<void> updateProfile({
-    required String userId,
-    required Map<String, dynamic> payload,
-  }) async {
-    await Future.delayed(const Duration(milliseconds: 300));
-    debugPrint(
-      '[MockApi] updateProfile payload: {userId: $userId, data: $payload}',
-    );
-    // Update local member data if exists
-    final idx = _members.indexWhere((e) => e['id'].toString() == userId);
-    if (idx != -1) {
-      _members[idx] = {..._members[idx], ...payload};
-    }
-  }
+  // removed: updateProfile/toggleVisibility/updateSearchRadius — now on Supabase
 
-  Future<void> toggleVisibility({required bool visible}) async {
-    await Future.delayed(const Duration(milliseconds: 180));
-    currentUser['visibility'] = visible;
-    debugPrint('[MockApi] toggleVisibility payload: {visible: $visible}');
-  }
-
-  Future<void> updateSearchRadius({required double radiusKm}) async {
-    await Future.delayed(const Duration(milliseconds: 180));
-    currentUser['search_radius_km'] = radiusKm;
-    debugPrint('[MockApi] updateSearchRadius payload: {radius_km: $radiusKm}');
-  }
-
-  Future<void> checkIn({required int locationId}) async {
-    await Future.delayed(const Duration(milliseconds: 220));
-    final loc = _locations.firstWhere(
-      (e) => e['id'] == locationId,
-      orElse: () => {},
-    );
-    _presence = {
-      'location_id': locationId,
-      'location_name': loc['name'] ?? 'Unknown',
-      'check_in_time': DateTime.now().toIso8601String(),
-      'last_heartbeat_at': DateTime.now().toIso8601String(),
-    };
-    debugPrint('[MockApi] checkIn payload: {locationId: $locationId}');
-  }
-
-  Future<void> checkOut() async {
-    await Future.delayed(const Duration(milliseconds: 180));
-    debugPrint('[MockApi] checkOut payload: {}');
-    _presence = null;
-  }
+  // removed: checkIn/checkOut — presence handled by Supabase in app
 
   Future<void> sendMessage({
     required String chatId,
@@ -926,95 +643,5 @@ class MockApi {
     debugPrint('[MockApi] markChatAsRead payload: {chatId: $chatId}');
   }
 
-  // --- Notifications ---
-  Future<List<Map<String, dynamic>>> getNotifications() async {
-    await Future.delayed(const Duration(milliseconds: 120));
-    return List<Map<String, dynamic>>.from(_notifications);
-  }
-
-  Future<void> markNotificationRead(String id) async {
-    await Future.delayed(const Duration(milliseconds: 60));
-    final idx = _notifications.indexWhere((n) => n['id'] == id);
-    if (idx != -1)
-      _notifications[idx] = {..._notifications[idx], 'isRead': true};
-  }
-
-  Future<void> markAllNotificationsRead() async {
-    await Future.delayed(const Duration(milliseconds: 80));
-    for (var i = 0; i < _notifications.length; i++) {
-      _notifications[i] = {..._notifications[i], 'isRead': true};
-    }
-  }
-
-  Future<void> acceptConnectionRequest(String notificationId) async {
-    await Future.delayed(const Duration(milliseconds: 100));
-    debugPrint(
-      '[MockApi] acceptConnectionRequest payload: {notificationId: $notificationId}',
-    );
-    final idx = _notifications.indexWhere((n) => n['id'] == notificationId);
-    if (idx != -1) {
-      final notif = _notifications[idx];
-      final senderId = notif['senderId']?.toString();
-      _notifications[idx] = {
-        ...notif,
-        'isRead': true,
-        'requiresAction': false,
-        'type': 'connectionAccepted',
-        'title': 'Koneksi Diterima',
-      };
-      if (senderId != null) {
-        final midx = _members.indexWhere((m) => m['id'].toString() == senderId);
-        if (midx != -1) {
-          _members[midx] = {..._members[midx], 'isConnected': true};
-          final exists = _chatList.any((c) => c['id'].toString() == senderId);
-          if (!exists) {
-            final m = _members[midx];
-            _chatList.add({
-              'id': senderId,
-              'name': m['name'] ?? (m['full_name'] ?? ''),
-              'avatar': m['avatar'] ?? m['profile_image_url'] ?? '',
-              'lastMessage': null,
-              'lastMessageTime': null,
-              'unreadCount': 0,
-              'isOnline': (m['isOnline'] as bool?) == true,
-            });
-            _chatMessages.putIfAbsent(senderId, () => []);
-          }
-        }
-      }
-    }
-  }
-
-  Future<void> declineConnectionRequest(String notificationId) async {
-    await Future.delayed(const Duration(milliseconds: 100));
-    debugPrint(
-      '[MockApi] declineConnectionRequest payload: {notificationId: $notificationId}',
-    );
-    final idx = _notifications.indexWhere((n) => n['id'] == notificationId);
-    if (idx != -1) {
-      final notif = _notifications[idx];
-      final senderId = notif['senderId']?.toString();
-      _notifications[idx] = {
-        ...notif,
-        'isRead': true,
-        'requiresAction': false,
-        'type': 'connectionRejected',
-        'title': 'Koneksi Ditolak',
-      };
-      if (senderId != null) {
-        final midx = _members.indexWhere((m) => m['id'].toString() == senderId);
-        if (midx != -1) {
-          _members[midx] = {..._members[midx], 'isConnected': false};
-        }
-        final cidx = _chatList.indexWhere((c) => c['id'].toString() == senderId);
-        if (cidx != -1) {
-          final msgs = _chatMessages[senderId] ?? const [];
-          if (msgs.isEmpty) {
-            _chatList.removeAt(cidx);
-            _chatMessages.remove(senderId);
-          }
-        }
-      }
-    }
-  }
+  // removed: notifications mock — app uses Supabase notifications
 }

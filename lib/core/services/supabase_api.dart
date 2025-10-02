@@ -38,6 +38,7 @@ class SupabaseApi {
   static Future<Map<String, dynamic>?> checkIn({
     required int locationId,
   }) async {
+    if (_c.auth.currentUser == null) return null;
     final res = await _c.rpc(
       'presence_check_in_org5',
       params: {'p_location_id': locationId},
@@ -47,10 +48,12 @@ class SupabaseApi {
   }
 
   static Future<void> heartbeat() async {
+    if (_c.auth.currentUser == null) return;
     await _c.rpc('presence_heartbeat_org5');
   }
 
   static Future<void> checkOut() async {
+    if (_c.auth.currentUser == null) return;
     await _c.rpc('presence_check_out_org5');
   }
 
@@ -66,17 +69,140 @@ class SupabaseApi {
   }
 
   static Future<List<Map<String, dynamic>>> getLocationsOrg5() async {
-    if (kDebugMode) {
-      // Debug log to confirm RPC call path
-      // ignore: avoid_print
-      print('[RPC] get_locations_org5 called');
-    }
     final res = await _c.rpc('get_locations_org5');
-    print(res);
     if (res is List) {
       return res.whereType<Map<String, dynamic>>().toList();
     }
     return const [];
+  }
+
+  // ==========================
+  // Chat (Org 5) — RPC helpers
+  // ==========================
+
+  static Future<Map<String, dynamic>?> getOrCreateDirectChat({
+    required String peerId,
+  }) async {
+    final res = await _c.rpc('get_or_create_direct_chat_org5', params: {
+      'p_peer_id': peerId,
+    });
+    if (res is Map<String, dynamic>) return res;
+    if (res is List && res.isNotEmpty && res.first is Map<String, dynamic>) {
+      return res.first as Map<String, dynamic>;
+    }
+    return null;
+  }
+
+  static Future<List<Map<String, dynamic>>> getChatListOrg5({
+    String search = '',
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final res = await _c.rpc('get_chat_list_org5', params: {
+      'p_search': search,
+      'p_limit': limit,
+      'p_offset': offset,
+    });
+    if (res is List) return res.whereType<Map<String, dynamic>>().toList();
+    return const [];
+  }
+
+  static Future<Map<String, dynamic>?> getRoomHeaderOrg5({
+    required String chatId,
+  }) async {
+    final res = await _c.rpc('get_room_header_org5', params: {
+      'p_chat_id': chatId,
+    });
+    if (res is Map<String, dynamic>) return res;
+    if (res is List && res.isNotEmpty && res.first is Map<String, dynamic>) {
+      return res.first as Map<String, dynamic>;
+    }
+    return null;
+  }
+
+  static Future<List<Map<String, dynamic>>> getMessagesOrg5({
+    required String chatId,
+    int limit = 50,
+    DateTime? before,
+  }) async {
+    final params = <String, dynamic>{
+      'p_chat_id': chatId,
+      'p_limit': limit,
+      if (before != null) 'p_before': before.toUtc().toIso8601String(),
+    };
+    final res = await _c.rpc('get_messages_org5', params: params);
+    if (res is List) return res.whereType<Map<String, dynamic>>().toList();
+    return const [];
+  }
+
+  static Future<Map<String, dynamic>?> sendMessageOrg5({
+    required String chatId,
+    required String text,
+    bool isImage = false,
+    String? imageUrl,
+    String? clientId,
+  }) async {
+    final params = <String, dynamic>{
+      'p_chat_id': chatId,
+      'p_text': text,
+      'p_is_image': isImage,
+      if (imageUrl != null) 'p_image_url': imageUrl,
+      if (clientId != null) 'p_client_id': clientId,
+    };
+    final res = await _c.rpc('send_message_org5', params: params);
+    if (res is Map<String, dynamic>) return res;
+    if (res is List && res.isNotEmpty && res.first is Map<String, dynamic>) {
+      return res.first as Map<String, dynamic>;
+    }
+    return null;
+  }
+
+  static Future<void> markReadOrg5({required String chatId}) async {
+    await _c.rpc('mark_read_org5', params: {'p_chat_id': chatId});
+  }
+
+  // Realtime Channels helpers (client broadcast)
+  static RealtimeChannel userChannel({String? uid}) {
+    final id = uid ?? _c.auth.currentUser?.id;
+    return _c.channel('user:${id ?? 'unknown'}');
+  }
+
+  static RealtimeChannel roomChannel(String chatId) {
+    return _c.channel('room:$chatId');
+  }
+
+  // Chat images (private bucket)
+  static const String _chatBucket = 'chatimages';
+
+  static Future<String?> uploadChatImage({
+    required String chatId,
+    required Uint8List bytes,
+    String contentType = 'image/jpeg',
+  }) async {
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final path = 'org5/$chatId/$ts.jpg';
+    await _c.storage
+        .from(_chatBucket)
+        .uploadBinary(
+          path,
+          bytes,
+          fileOptions: FileOptions(upsert: true, contentType: contentType),
+        );
+    return path;
+  }
+
+  static Future<String?> getSignedChatImageUrl({
+    required String path,
+    int expiresIn = 60 * 60,
+  }) async {
+    final result = await _c.storage.from(_chatBucket).createSignedUrl(path, expiresIn);
+    if (result is String) return result;
+    if (result is Map) {
+      final map = Map<String, dynamic>.from(result as Map);
+      final s = map['signedUrl'] ?? map['signed_url'];
+      if (s is String) return s;
+    }
+    return null;
   }
 
   // Upload avatar image to 'avatars' bucket under org5/<uid>/profile.jpg
@@ -166,6 +292,34 @@ class SupabaseApi {
     return const [];
   }
 
+  // Notifications (Org 5)
+  static Future<List<Map<String, dynamic>>> getNotificationsOrg5({
+    bool onlyUnread = false,
+    int limit = 50,
+  }) async {
+    final res = await _c.rpc(
+      'get_notifications_org5',
+      params: {
+        'p_only_unread': onlyUnread,
+        'p_limit': limit,
+      },
+    );
+    if (res is List) {
+      return res.whereType<Map<String, dynamic>>().toList();
+    }
+    return const [];
+  }
+
+  static Future<void> markAllNotificationsReadOrg5() async {
+    await _c.rpc('mark_all_notifications_read_org5');
+  }
+
+  static Future<void> markNotificationReadOrg5({
+    required String id,
+  }) async {
+    await _c.rpc('mark_notification_read_org5', params: {'p_id': id});
+  }
+
   // Connect — Members (Org 5)
   static Future<Map<String, dynamic>> getMembersOrg5({
     required String tab, // 'nearest' | 'network'
@@ -217,15 +371,7 @@ class SupabaseApi {
   static Future<Map<String, dynamic>?> getMemberDetailOrg5({
     required String id,
   }) async {
-    if (kDebugMode) {
-      // ignore: avoid_print
-      print('[RPC] get_member_detail_org5 id=$id');
-    }
     final res = await _c.rpc('get_member_detail_org5', params: {'p_id': id});
-    if (kDebugMode) {
-      // ignore: avoid_print
-      print('[RPC] get_member_detail_org5 resp=${res.runtimeType}');
-    }
     if (res is Map<String, dynamic>) return res;
     if (res is List && res.isNotEmpty && res.first is Map<String, dynamic>) {
       return res.first as Map<String, dynamic>;

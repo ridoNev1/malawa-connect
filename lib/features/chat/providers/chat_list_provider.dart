@@ -1,6 +1,7 @@
 // lib/features/chat/providers/chat_list_provider.dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/services/mock_api.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/services/supabase_api.dart';
 
 class ChatListState {
   final List<Map<String, dynamic>> chatRooms;
@@ -35,16 +36,65 @@ class ChatListState {
 }
 
 class ChatListNotifier extends Notifier<ChatListState> {
+  RealtimeChannel? _userChan;
   @override
   ChatListState build() {
+    ref.onDispose(() async {
+      if (_userChan != null) {
+        try {
+          await _userChan!.unsubscribe();
+        } catch (_) {}
+      }
+    });
+    _initRealtime();
     return ChatListState(chatRooms: []);
+  }
+
+  void _initRealtime() {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+    _userChan = SupabaseApi.userChannel(uid: uid)
+      ..onBroadcast(event: 'chat_update', callback: (payload, [ref]) async {
+        // payload shape can be Map with {event, payload}
+        Map<String, dynamic>? data;
+        if (payload is Map) {
+          if (payload['payload'] is Map) {
+            data = (payload['payload'] as Map).cast<String, dynamic>();
+          } else {
+            data = payload.cast<String, dynamic>();
+          }
+        }
+        if (data != null) {
+          // Soft-refresh: update last message in-place if found
+          final chatId = (data['chat_id'] ?? '').toString();
+          final lastText = (data['last_message_text'] ?? '').toString();
+          final lastAt = (data['last_message_at'] ?? '').toString();
+          final updated = state.chatRooms.map((e) {
+            if (e['id'].toString() == chatId) {
+              return {
+                ...e,
+                'lastMessage': lastText,
+                'lastMessageTime': lastAt,
+              };
+            }
+            return e;
+          }).toList();
+          state = state.copyWith(chatRooms: updated);
+          // Optionally resort by lastMessageTime via full refresh
+          await loadChatRooms();
+        }
+      })
+      ..subscribe();
   }
 
   Future<void> loadChatRooms() async {
     state = state.copyWith(isLoading: true);
     try {
-      final chatRooms = await MockApi.instance
-          .getChatList(limit: state.pageSize, offset: 0);
+      final chatRooms = await SupabaseApi.getChatListOrg5(
+        search: '',
+        limit: state.pageSize,
+        offset: 0,
+      );
       state = state.copyWith(
         chatRooms: chatRooms,
         hasMore: chatRooms.length == state.pageSize,
@@ -61,8 +111,11 @@ class ChatListNotifier extends Notifier<ChatListState> {
     state = state.copyWith(isLoadingMore: true);
     try {
       final offset = state.chatRooms.length;
-      final more = await MockApi.instance
-          .getChatList(limit: state.pageSize, offset: offset);
+      final more = await SupabaseApi.getChatListOrg5(
+        search: '',
+        limit: state.pageSize,
+        offset: offset,
+      );
       state = state.copyWith(
         chatRooms: [...state.chatRooms, ...more],
         isLoadingMore: false,
@@ -74,7 +127,7 @@ class ChatListNotifier extends Notifier<ChatListState> {
   }
 
   Future<void> markAsRead(String chatId) async {
-    await MockApi.instance.markChatAsRead(chatId);
+    await SupabaseApi.markReadOrg5(chatId: chatId);
     final updatedChatRooms = state.chatRooms.map((chat) {
       if (chat['id'] == chatId) {
         return {...chat, 'unreadCount': 0};
@@ -86,14 +139,12 @@ class ChatListNotifier extends Notifier<ChatListState> {
   }
 
   void updateLastMessage(String chatId, String message, bool isSentByMe) {
-    final now = DateTime.now();
-
     final updatedChatRooms = state.chatRooms.map((chat) {
       if (chat['id'] == chatId) {
         return {
           ...chat,
           'lastMessage': message,
-          'lastMessageTime': now.toIso8601String(),
+          'lastMessageTime': DateTime.now().toIso8601String(),
           'unreadCount': isSentByMe
               ? 0
               : ((chat['unreadCount'] ?? 0) as int) + 1,

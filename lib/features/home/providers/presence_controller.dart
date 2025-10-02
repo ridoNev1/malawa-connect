@@ -1,6 +1,5 @@
 // lib/features/home/providers/presence_controller.dart
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'home_providers.dart';
 import 'geofence_watcher.dart';
@@ -60,10 +59,6 @@ class PresenceController extends Notifier<PresenceControllerState> {
     try {
       final p = await SupabaseApi.getCurrentPresence();
       if (p != null) {
-        if (kDebugMode) {
-          // ignore: avoid_print
-          print('[HB] resume: active presence found, restarting heartbeat');
-        }
         state = state.copyWith(
           active: true,
           locationId: p['location_id'] as int?,
@@ -77,24 +72,13 @@ class PresenceController extends Notifier<PresenceControllerState> {
       } else {
         // Ensure no stale heartbeat
         stopHeartbeat();
-        if (kDebugMode) {
-          // ignore: avoid_print
-          print('[HB] resume: no active presence');
-        }
       }
     } catch (e) {
-      if (kDebugMode) {
-        // ignore: avoid_print
-        print('[HB] resume error: $e');
-      }
+      // silent
     }
   }
 
   Future<void> checkIn(int locationId) async {
-    if (kDebugMode) {
-      // ignore: avoid_print
-      print('[HB] checkIn -> locationId=$locationId');
-    }
     await SupabaseApi.checkIn(locationId: locationId);
     final p = await SupabaseApi.getCurrentPresence();
     state = state.copyWith(
@@ -104,35 +88,19 @@ class PresenceController extends Notifier<PresenceControllerState> {
       checkInAt: DateTime.tryParse((p?['check_in_time'] ?? '').toString()),
     );
     startHeartbeat();
-    if (kDebugMode) {
-      // ignore: avoid_print
-      print('[HB] refresh presence after checkIn');
-    }
     await ref.refresh(presenceProvider.future);
   }
 
   Future<void> checkOut() async {
-    if (kDebugMode) {
-      // ignore: avoid_print
-      print('[HB] checkOut');
-    }
     await SupabaseApi.checkOut();
     stopHeartbeat();
     state = const PresenceControllerState();
-    if (kDebugMode) {
-      // ignore: avoid_print
-      print('[HB] refresh presence after checkOut');
-    }
     await ref.refresh(presenceProvider.future);
   }
 
   void startHeartbeat({Duration? interval}) {
     _timer?.cancel();
     final dur = interval ?? Duration(seconds: AppEnv.heartbeatSeconds);
-    if (kDebugMode) {
-      // ignore: avoid_print
-      print('[HB] start interval=${dur.inSeconds}s');
-    }
     _timer = Timer.periodic(dur, (_) async {
       try {
         await SupabaseApi.heartbeat();
@@ -144,15 +112,8 @@ class PresenceController extends Notifier<PresenceControllerState> {
         await ref.read(geofenceWatcherProvider.notifier).evaluateOnce();
         // Then refresh presence to reflect new server state immediately
         await ref.refresh(presenceProvider.future);
-        if (kDebugMode) {
-          // ignore: avoid_print
-          print('[HB] tick at ${now.toIso8601String()}');
-        }
       } catch (e) {
-        if (kDebugMode) {
-          // ignore: avoid_print
-          print('[HB] error: $e');
-        }
+        // silent
       }
     });
     state = state.copyWith(heartbeatRunning: true);
@@ -162,17 +123,9 @@ class PresenceController extends Notifier<PresenceControllerState> {
     _timer?.cancel();
     _timer = null;
     state = state.copyWith(heartbeatRunning: false);
-    if (kDebugMode) {
-      // ignore: avoid_print
-      print('[HB] stopped');
-    }
   }
 
   Future<void> beatOnce() async {
-    if (kDebugMode) {
-      // ignore: avoid_print
-      print('[HB] manual beat');
-    }
     await SupabaseApi.heartbeat();
     final now = DateTime.now();
     state = state.copyWith(lastBeatAt: now);
@@ -182,5 +135,5 @@ class PresenceController extends Notifier<PresenceControllerState> {
 
 final presenceControllerProvider =
     NotifierProvider<PresenceController, PresenceControllerState>(
-  PresenceController.new,
-);
+      PresenceController.new,
+    );

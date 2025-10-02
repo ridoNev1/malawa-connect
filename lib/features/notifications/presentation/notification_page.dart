@@ -5,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/theme.dart';
 import '../../../shared/widgets/bottom_navigation.dart';
 import '../providers/notifications_provider.dart';
-import '../../../core/services/mock_api.dart';
+import '../../../core/services/supabase_api.dart';
 
 class NotificationPage extends ConsumerStatefulWidget {
   const NotificationPage({super.key});
@@ -75,7 +75,9 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
         notification['requiresAction'] == true) {
       _showConnectionActionDialog(notification);
     } else if (notification['isRead'] == false) {
-      await MockApi.instance.markNotificationRead(notification['id']);
+      await SupabaseApi.markNotificationReadOrg5(
+        id: notification['id'].toString(),
+      );
       await notifier.refresh();
     }
   }
@@ -90,31 +92,45 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(notification['title']),
+        title: Text(notification['title'] ?? 'Permintaan koneksi'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                CircleAvatar(
-                  radius: 24,
-                  backgroundImage: NetworkImage(notification['senderAvatar']),
-                ),
+                if (((notification['senderAvatar'] ??
+                            notification['sender_avatar']) ??
+                        '')
+                    .toString()
+                    .isNotEmpty)
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundImage: NetworkImage(
+                      (notification['senderAvatar'] ??
+                              notification['sender_avatar'])
+                          .toString(),
+                    ),
+                  )
+                else
+                  const CircleAvatar(radius: 24, child: Icon(Icons.person)),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        notification['senderName'] ?? '',
+                        (notification['senderName'] ??
+                                notification['sender_name'] ??
+                                'Tidak diketahui')
+                            .toString(),
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       Text(
-                        notification['message'],
+                        (notification['message'] ?? '').toString(),
                         style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                       ),
                     ],
@@ -128,7 +144,8 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              await ref.read(notificationsProvider.notifier)
+              await ref
+                  .read(notificationsProvider.notifier)
                   .decline(notification['id']);
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
@@ -144,15 +161,23 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              viewProfile(notification['senderId']);
+              viewProfile(
+                (notification['senderId'] ?? notification['sender_id'])
+                    ?.toString(),
+              );
             },
             child: const Text('Lihat Profil'),
           ),
           FilledButton(
             onPressed: () async {
               Navigator.pop(context);
-              await ref.read(notificationsProvider.notifier)
-                  .accept(notification['id']);
+              // Pass requesterId (senderId) for accept
+              await ref
+                  .read(notificationsProvider.notifier)
+                  .accept(
+                    (notification['senderId'] ?? notification['sender_id'])
+                        .toString(),
+                  );
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
@@ -222,45 +247,50 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
         ],
       ),
       body: SafeArea(
-        child: Consumer(builder: (context, ref, _) {
-          final s = ref.watch(notificationsProvider);
-          if (!s.loading && s.items.isEmpty) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              ref.read(notificationsProvider.notifier).refresh();
-            });
-          }
-          return s.items.isEmpty
-              ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.notifications_off_outlined,
-                      size: 64,
-                      color: Colors.grey[400],
+        child: Consumer(
+          builder: (context, ref, _) {
+            final s = ref.watch(notificationsProvider);
+            if (!s.loading && s.items.isEmpty) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                ref.read(notificationsProvider.notifier).refresh();
+              });
+            }
+            return s.items.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.notifications_off_outlined,
+                          size: 64,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Belum ada notifikasi',
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Belum ada notifikasi',
-                      style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                  )
+                : RefreshIndicator(
+                    onRefresh: () =>
+                        ref.read(notificationsProvider.notifier).refresh(),
+                    color: MC.darkBrown,
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: s.items.length,
+                      itemBuilder: (context, index) {
+                        final notification = s.items[index];
+                        return _buildNotificationCard(notification);
+                      },
                     ),
-                  ],
-                ),
-              )
-              : RefreshIndicator(
-                  onRefresh: () =>
-                      ref.read(notificationsProvider.notifier).refresh(),
-                  color: MC.darkBrown,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: s.items.length,
-                    itemBuilder: (context, index) {
-                      final notification = s.items[index];
-                      return _buildNotificationCard(notification);
-                    },
-                  ),
-                );
-        }),
+                  );
+          },
+        ),
       ),
       bottomNavigationBar: AppBottomNavigation(
         currentIndex: 2,
@@ -333,15 +363,6 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
                       children: [
                         Row(
                           children: [
-                            if (notification['senderAvatar'] != null) ...[
-                              CircleAvatar(
-                                radius: 16,
-                                backgroundImage: NetworkImage(
-                                  notification['senderAvatar'],
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                            ],
                             Expanded(
                               child: Text(
                                 notification['title'],
@@ -365,8 +386,13 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
                             const SizedBox(width: 8),
                             // Time
                             Text(
-                              formatTime(DateTime.parse(
-                                  notification['timestamp'].toString())),
+                              formatTime(
+                                DateTime.parse(
+                                  (notification['created_at'] ??
+                                          notification['timestamp'])
+                                      .toString(),
+                                ),
+                              ),
                               style: TextStyle(
                                 fontSize: 12,
                                 color: Colors.grey[500],
@@ -376,28 +402,179 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          notification['message'],
+                          notification['message'] ?? '',
                           style: TextStyle(
                             fontSize: 14,
                             color: Colors.grey[700],
                           ),
                         ),
+
+                        // Show requester detail for connection requests (fallbacks when name missing)
+                        if (notification['type']?.toString() ==
+                            'connectionRequest') ...[
+                          const SizedBox(height: 6),
+                          InkWell(
+                            onTap: () => viewProfile(
+                              (notification['senderId'] ??
+                                      notification['sender_id'] ??
+                                      notification['senderid'])
+                                  ?.toString(),
+                            ),
+                            child: Row(
+                              children: [
+                                if ((((notification['senderAvatar'] ??
+                                                notification['sender_avatar']) ??
+                                            notification['senderavatar']) ??
+                                        '')
+                                    .toString()
+                                    .isNotEmpty)
+                                  CircleAvatar(
+                                    radius: 12,
+                                    backgroundImage: NetworkImage(
+                                      ((notification['senderAvatar'] ??
+                                                  notification['sender_avatar']) ??
+                                              notification['senderavatar'])
+                                          .toString(),
+                                    ),
+                                  )
+                                else
+                                  const Icon(
+                                    Icons.person,
+                                    size: 18,
+                                    color: MC.darkBrown,
+                                  ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Builder(
+                                    builder: (context) {
+                                      final senderName =
+                                          (notification['senderName'] ??
+                                                  notification['sender_name'] ??
+                                                  notification['sendername'] ??
+                                                  '')
+                                              .toString()
+                                              .trim();
+                                      final senderId =
+                                          (notification['senderId'] ??
+                                                  notification['sender_id'] ??
+                                                  notification['senderid'] ??
+                                                  '')
+                                              .toString();
+                                      String label;
+                                      if (senderName.isNotEmpty) {
+                                        label = senderName;
+                                      } else if (senderId.isNotEmpty) {
+                                        // show short uuid as fallback
+                                        final shortId = senderId.length > 8
+                                            ? senderId.substring(0, 8)
+                                            : senderId;
+                                        label = 'ID: $shortId';
+                                      } else {
+                                        label = 'Tidak diketahui';
+                                      }
+                                      return Text(
+                                        'Dari: $label',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: MC.darkBrown,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                                if ((notification['type']?.toString() ==
+                                        'connectionRequest') &&
+                                    (notification['isRead'] == true ||
+                                        notification['requiresAction'] ==
+                                            false)) ...[
+                                  const SizedBox(height: 10),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: (() {
+                                          final r =
+                                              (notification['actionResult'] ??
+                                                      '')
+                                                  .toString();
+                                          if (r == 'accepted') {
+                                            return Colors.green.withOpacity(
+                                              0.12,
+                                            );
+                                          }
+                                          if (r == 'declined') {
+                                            return Colors.red.withOpacity(0.12);
+                                          }
+                                          return Colors.green.withOpacity(0.12);
+                                        })(),
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: Text(
+                                        (() {
+                                          final r =
+                                              (notification['actionResult'] ??
+                                                      '')
+                                                  .toString();
+                                          if (r == 'accepted') {
+                                            return 'Connected';
+                                          }
+                                          if (r == 'declined') return 'Ditolak';
+                                          return 'Selesai';
+                                        })(),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: (() {
+                                            final r =
+                                                (notification['actionResult'] ??
+                                                        '')
+                                                    .toString();
+                                            if (r == 'accepted') {
+                                              return Colors.green.shade700;
+                                            }
+                                            if (r == 'declined') {
+                                              return Colors.red.shade700;
+                                            }
+                                            return Colors.grey.shade700;
+                                          })(),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
                 ],
               ),
 
-              // Action buttons for connection requests - PERUBAHAN DI SINI
-              if (notification['type'] == 'connectionRequest' &&
-                  notification['requiresAction'] == true) ...[
+              // Action buttons for connection requests (pending + unread)
+              if ((notification['type']?.toString() == 'connectionRequest') &&
+                  (notification['requiresAction'] == true) &&
+                  (notification['isRead'] != true)) ...[
                 const SizedBox(height: 12),
                 Row(
                   children: [
                     // Lihat Profil button
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () => viewProfile(notification['senderId']),
+                        onPressed: () => viewProfile(
+                          (notification['senderId'] ??
+                                  notification['sender_id'] ??
+                                  notification['senderid'])
+                              ?.toString(),
+                        ),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: MC.darkBrown,
                           side: const BorderSide(color: MC.darkBrown),
@@ -416,11 +593,27 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
                     // Reject button
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () {
+                        onPressed: () async {
+                          await ref
+                              .read(notificationsProvider.notifier)
+                              .decline(
+                                (notification['senderId'] ??
+                                        notification['sender_id'] ??
+                                        notification['senderid'])
+                                    .toString(),
+                              );
+                          // mark the request notification as read
+                          try {
+                            await SupabaseApi.markNotificationReadOrg5(
+                              id: notification['id'].toString(),
+                            );
+                          } catch (_) {}
                           setState(() {
                             notification['isRead'] = true;
                             notification['requiresAction'] = false;
+                            notification['actionResult'] = 'declined';
                           });
+                          if (!mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text('Permintaan koneksi ditolak'),
@@ -443,14 +636,30 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    // Accept button - PERUBAHAN MENJADI OUTLINE DENGAN WARNA HIJAU
+                    // Accept button - outline green
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () {
+                        onPressed: () async {
+                          await ref
+                              .read(notificationsProvider.notifier)
+                              .accept(
+                                (notification['senderId'] ??
+                                        notification['sender_id'] ??
+                                        notification['senderid'])
+                                    .toString(),
+                              );
+                          // mark the request notification as read
+                          try {
+                            await SupabaseApi.markNotificationReadOrg5(
+                              id: notification['id'].toString(),
+                            );
+                          } catch (_) {}
                           setState(() {
                             notification['isRead'] = true;
                             notification['requiresAction'] = false;
+                            notification['actionResult'] = 'accepted';
                           });
+                          if (!mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text('Permintaan koneksi diterima'),
@@ -475,6 +684,8 @@ class _NotificationPageState extends ConsumerState<NotificationPage> {
                   ],
                 ),
               ],
+
+              // Status chip when already handled (accepted/declined)
             ],
           ),
         ),

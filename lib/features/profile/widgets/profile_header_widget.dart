@@ -239,8 +239,9 @@ class ProfileHeaderWidget extends ConsumerWidget {
                           (e) => e['id'] == locId,
                           orElse: () => {},
                         );
-                        if (found.isNotEmpty)
+                        if (found.isNotEmpty) {
                           locName = (found['name'] ?? '-').toString();
+                        }
                       }
                     }
                     if (locName.isEmpty) locName = '-';
@@ -253,17 +254,26 @@ class ProfileHeaderWidget extends ConsumerWidget {
                         final dt = DateTime.parse(iso).toLocal();
                         final now = DateTime.now();
                         final diff = now.difference(dt);
-                        if (diff.inSeconds < 60) rel = 'Baru saja';
-                        else if (diff.inMinutes < 60) rel = '${diff.inMinutes} menit yang lalu';
-                        else if (diff.inHours < 24) rel = '${diff.inHours} jam yang lalu';
-                        else if (diff.inDays < 7) rel = '${diff.inDays} hari yang lalu';
-                        else {
+                        if (diff.inSeconds < 60) {
+                          rel = 'Baru saja';
+                        } else if (diff.inMinutes < 60) {
+                          rel = '${diff.inMinutes} menit yang lalu';
+                        } else if (diff.inHours < 24) {
+                          rel = '${diff.inHours} jam yang lalu';
+                        } else if (diff.inDays < 7) {
+                          rel = '${diff.inDays} hari yang lalu';
+                        } else {
                           final weeks = (diff.inDays / 7).floor();
-                          if (weeks < 5) rel = '$weeks minggu yang lalu';
-                          else {
+                          if (weeks < 5) {
+                            rel = '$weeks minggu yang lalu';
+                          } else {
                             final months = (diff.inDays / 30).floor();
-                            if (months < 12) rel = '$months bulan yang lalu';
-                            else rel = '${(diff.inDays / 365).floor()} tahun yang lalu';
+                            if (months < 12) {
+                              rel = '$months bulan yang lalu';
+                            } else {
+                              rel =
+                                  '${(diff.inDays / 365).floor()} tahun yang lalu';
+                            }
                           }
                         }
                       } catch (_) {}
@@ -280,151 +290,154 @@ class ProfileHeaderWidget extends ConsumerWidget {
         else
           const SizedBox.shrink(),
 
-        // Add connection button for view-only mode
-        if (!isEditable) ...[
+        // Add connection button for view-only mode (driven by Supabase status)
+        if (!isEditable && userId != null) ...[
           const SizedBox(height: 16),
-          isConnected
-              ? _buildConnectedButton(context)
-              : _buildRequestConnectButton(context),
-        ],
-
-        // Add some additional info for view-only mode
-        if (!isEditable) ...[
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.green[50],
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.verified, color: Colors.green, size: 16),
-                SizedBox(width: 6),
-                Text(
-                  'Member Terverifikasi',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.green,
-                    fontWeight: FontWeight.w600,
-                  ),
+          Consumer(
+            builder: (context, ref, _) {
+              final async = ref.watch(memberByIdProvider(userId!));
+              return async.when(
+                data: (m) {
+                  final status = (m?['connection_status'] ?? '').toString();
+                  final peerId = (m?['member_id'] ?? '').toString();
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (status == 'accepted') {
+                    // Connected badge + dropdown to disconnect
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: Colors.green.withOpacity(0.3),
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.verified,
+                                color: Colors.green,
+                                size: 16,
+                              ),
+                              SizedBox(width: 6),
+                              Text(
+                                'Connected',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.green,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        PopupMenuButton<String>(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          onSelected: (value) async {
+                            if (value == 'disconnect') {
+                              try {
+                                await SupabaseApi.unfriendOrg5(peerId: peerId);
+                                await ref.refresh(
+                                  memberByIdProvider(userId!).future,
+                                );
+                                messenger?.showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Koneksi diputus'),
+                                  ),
+                                );
+                              } catch (e) {
+                                messenger?.showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Gagal memutuskan koneksi: $e',
+                                    ),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          itemBuilder: (context) => const [
+                            PopupMenuItem(
+                              value: 'disconnect',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.link_off, color: Colors.red),
+                                  SizedBox(width: 8),
+                                  Text('Putuskan koneksi'),
+                                ],
+                              ),
+                            ),
+                          ],
+                          icon: const Icon(
+                            Icons.more_horiz,
+                            color: MC.darkBrown,
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+                  if (status == 'pending') {
+                    return OutlinedButton.icon(
+                      onPressed: null,
+                      icon: const Icon(Icons.hourglass_empty, size: 18),
+                      label: const Text('Menunggu'),
+                    );
+                  }
+                  // Default: Request connect
+                  return FilledButton.icon(
+                    onPressed: () async {
+                      try {
+                        await SupabaseApi.sendConnectionRequestOrg5(
+                          addresseeId: peerId,
+                          connectionType: 'friend',
+                        );
+                        await ref.refresh(memberByIdProvider(userId!).future);
+                        messenger?.showSnackBar(
+                          const SnackBar(
+                            content: Text('Permintaan koneksi dikirim'),
+                          ),
+                        );
+                      } catch (e) {
+                        messenger?.showSnackBar(
+                          SnackBar(
+                            content: Text('Gagal mengirim permintaan: $e'),
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.person_add_alt, size: 18),
+                    label: const Text('Request Connect'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: MC.darkBrown,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    ),
+                  );
+                },
+                loading: () => OutlinedButton(
+                  onPressed: null,
+                  child: const Text('Memuat status…'),
                 ),
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildRequestConnectButton(BuildContext context) {
-    return OutlinedButton(
-      onPressed: () {
-        if (onConnectionChanged != null) {
-          onConnectionChanged!(true);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Permintaan koneksi telah dikirim'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      },
-      style: OutlinedButton.styleFrom(
-        foregroundColor: MC.darkBrown,
-        side: const BorderSide(color: MC.darkBrown),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-      ),
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.person_add, size: 18),
-          SizedBox(width: 8),
-          Text(
-            'Request Connect',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildConnectedButton(BuildContext context) {
-    return PopupMenuButton<String>(
-      onSelected: (value) {
-        if (value == 'disconnect' && onConnectionChanged != null) {
-          onConnectionChanged!(false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Koneksi telah diputus'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        } else if (value == 'message') {
-          if (userId != null) {
-            if (MockApi.instance.isBlocked(userId!)) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Tidak bisa mengirim pesan ke user yang diblokir',
-                  ),
+                error: (e, st) => OutlinedButton(
+                  onPressed: null,
+                  child: const Text('Status tidak tersedia'),
                 ),
               );
-            } else {
-              _openChat(context, userId!);
-            }
-          }
-        }
-      },
-      itemBuilder: (context) => [
-        const PopupMenuItem(
-          value: 'message',
-          child: Row(
-            children: [
-              Icon(Icons.message),
-              SizedBox(width: 8),
-              Text('Kirim Pesan'),
-            ],
+            },
           ),
-        ),
-        const PopupMenuItem(
-          value: 'disconnect',
-          child: Row(
-            children: [
-              Icon(Icons.person_remove, color: Colors.red),
-              SizedBox(width: 8),
-              Text('Putus Koneksi', style: TextStyle(color: Colors.red)),
-            ],
-          ),
-        ),
+        ],
       ],
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.green[100],
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.green[300]!),
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.check_circle, color: Colors.green, size: 18),
-            SizedBox(width: 8),
-            Text(
-              'Connected',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.green,
-              ),
-            ),
-            SizedBox(width: 4),
-            Icon(Icons.arrow_drop_down, color: Colors.green),
-          ],
-        ),
-      ),
     );
   }
 

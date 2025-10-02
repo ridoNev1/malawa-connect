@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter/foundation.dart';
 import 'package:malawa_connect/features/home/providers/home_providers.dart';
 import '../../../core/services/location_service.dart';
 import 'presence_controller.dart';
@@ -71,16 +70,12 @@ class GeofenceWatcher extends Notifier<GeofenceState> {
 
     // Fallback poll: ensure periodic evaluation even when stream is quiet
     _poll?.cancel();
-    _poll = Timer.periodic(
-      Duration(seconds: AppEnv.geofencePollSeconds),
-      (_) async {
-        if (kDebugMode) {
-          // ignore: avoid_print
-          print('[GEOFENCE] poll tick');
-        }
-        await evaluateOnce();
-      },
-    );
+    _poll = Timer.periodic(Duration(seconds: AppEnv.geofencePollSeconds), (
+      _,
+    ) async {
+      // silent poll in production
+      await evaluateOnce();
+    });
   }
 
   Future<void> _evaluatePosition(double lat, double lng) async {
@@ -123,18 +118,12 @@ class GeofenceWatcher extends Notifier<GeofenceState> {
       }
     }
 
-    if (kDebugMode) {
-      print(
-        '[GEOFENCE] device=($lat,$lng) nearest=${nearestLoc != null ? '${nearestLoc['id']}(${nearestLoc['lat']},${nearestLoc['lng']})' : 'none'} dist=${nearestDist?.toStringAsFixed(2)}m',
-      );
-    }
+    // silent diagnostics removed
 
     if (nearestLoc != null && nearestDist != null) {
       final radius = toDouble(nearestLoc['geofence_radius_m']) ?? 100.0;
       final isInside = nearestDist <= radius;
-      if (kDebugMode) {
-        print('[GEOFENCE] radius=$radius inside=$isInside');
-      }
+      // silent diagnostics removed
       if (isInside) {
         insideId = nearestLoc['id'] as int?;
       }
@@ -165,7 +154,9 @@ class GeofenceWatcher extends Notifier<GeofenceState> {
         return;
       }
       // If no position available but debug override exists, use it
-      if (AppEnv.geofenceDebug && AppEnv.debugLat != null && AppEnv.debugLng != null) {
+      if (AppEnv.geofenceDebug &&
+          AppEnv.debugLat != null &&
+          AppEnv.debugLng != null) {
         await _evaluatePosition(AppEnv.debugLat!, AppEnv.debugLng!);
       }
     } catch (_) {}

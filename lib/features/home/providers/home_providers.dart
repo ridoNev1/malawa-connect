@@ -5,7 +5,19 @@ import '../../../core/services/mock_api.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/services/supabase_api.dart';
 
+// Stream of auth UID changes to trigger provider recomputation on login/logout
+final authUidProvider = StreamProvider<String?>((ref) async* {
+  // Emit initial uid
+  yield Supabase.instance.client.auth.currentUser?.id;
+  // Then forward auth state changes
+  await for (final _ in Supabase.instance.client.auth.onAuthStateChange) {
+    yield Supabase.instance.client.auth.currentUser?.id;
+  }
+});
+
 final currentUserProvider = FutureProvider<Map<String, dynamic>>((ref) async {
+  // Depend on auth state so this provider recomputes when session changes
+  ref.watch(authUidProvider);
   final uid = Supabase.instance.client.auth.currentUser?.id;
   if (uid == null) return <String, dynamic>{};
   final data = await SupabaseApi.getCustomerByMemberIdOrg5(memberId: uid);
@@ -17,6 +29,7 @@ final discountsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async
 });
 
 final presenceProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
+  ref.watch(authUidProvider);
   final uid = Supabase.instance.client.auth.currentUser?.id;
   if (uid == null) return null;
   try {

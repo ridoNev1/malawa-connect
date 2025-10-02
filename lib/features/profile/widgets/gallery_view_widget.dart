@@ -310,7 +310,7 @@ class _FullScreenGalleryPageState extends State<FullScreenGalleryPage> {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      '${_currentIndex + 1} / 5',
+                      '${_currentIndex + 1} / ${widget.images.length}',
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 14,

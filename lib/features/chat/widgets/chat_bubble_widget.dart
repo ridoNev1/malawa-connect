@@ -105,15 +105,27 @@ class ChatBubbleWidget extends StatelessWidget {
 
     Widget content;
     if (message.isImage) {
-      // Simple image placeholder to avoid platform-specific File handling
+      final url = message.text;
       content = ClipRRect(
         borderRadius: radius,
-        child: Container(
-          color: Colors.grey[200],
+        child: SizedBox(
           width: 200,
           height: 200,
-          alignment: Alignment.center,
-          child: const Icon(Icons.image, color: Colors.grey, size: 48),
+          child: (url.startsWith('http'))
+              ? Image.network(
+                  url,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stack) => Container(
+                    color: Colors.grey[200],
+                    alignment: Alignment.center,
+                    child: const Icon(Icons.broken_image, color: Colors.grey, size: 48),
+                  ),
+                )
+              : Container(
+                  color: Colors.grey[200],
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.image, color: Colors.grey, size: 48),
+                ),
         ),
       );
     } else {

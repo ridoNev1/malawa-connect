@@ -33,6 +33,7 @@ class _ProfileViewPageState extends ConsumerState<ProfileViewPage> {
     Future.microtask(
       () => ref.read(profileProvider.notifier).loadUserDataById(widget.userId),
     );
+    // Connection status for view-only is now derived inside ProfileHeaderWidget
   }
 
   void _handleConnectionChanged(bool isConnected) {
@@ -92,16 +93,32 @@ class _ProfileViewPageState extends ConsumerState<ProfileViewPage> {
         actions: [
           IconButton(
             onPressed: () async {
-              if (MockApi.instance.isBlocked(widget.userId)) {
+              try {
+                // Resolve peer's member_id via provider (RPC returns both legacy id & member_id)
+                final m = await ref.read(memberByIdProvider(widget.userId).future);
+                final peerUuid = (m?['member_id'] ?? m?['memberId'])?.toString();
+                if (peerUuid == null || peerUuid.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Gagal membuka chat: ID tidak valid')),
+                  );
+                  return;
+                }
+                final room = await SupabaseApi.getOrCreateDirectChat(peerId: peerUuid);
+                final roomId = (room?['id'] ?? '').toString();
+                if (roomId.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Gagal membuat ruang chat')),
+                  );
+                  return;
+                }
+                if (!mounted) return;
+                context.push('/chat/room/$roomId');
+              } catch (e) {
+                if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Tidak bisa mengirim pesan ke user yang diblokir')),
+                  SnackBar(content: Text('Gagal membuka chat: $e')),
                 );
-                return;
               }
-              final chat = await MockApi.instance
-                  .getOrCreateDirectChatByUserId(widget.userId);
-              if (!mounted) return;
-              context.push('/chat/room/${chat['id']}');
             },
             icon: const Icon(Icons.message, color: MC.darkBrown),
           ),

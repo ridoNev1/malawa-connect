@@ -270,17 +270,19 @@ class MemberCardWidget extends ConsumerWidget {
     if (status == 'accepted') {
       return OutlinedButton.icon(
         onPressed: () async {
+          // Capture messenger before async awaits to avoid ancestor lookup after disposal
+          final messenger = ScaffoldMessenger.maybeOf(context);
           try {
             await SupabaseApi.unfriendOrg5(peerId: peerId);
             // Refresh lists + derived counts
             await ref.read(membersProvider.notifier).refresh();
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(const SnackBar(content: Text('Koneksi diputuskan')));
+            messenger?.showSnackBar(
+              const SnackBar(content: Text('Koneksi diputuskan')),
+            );
           } catch (e) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('Gagal memutuskan: $e')));
+            messenger?.showSnackBar(
+              SnackBar(content: Text('Gagal memutuskan: $e')),
+            );
           }
         },
         icon: const Icon(Icons.link_off, size: 18),
@@ -304,17 +306,18 @@ class MemberCardWidget extends ConsumerWidget {
     // Default: can send request
     return FilledButton.icon(
       onPressed: () async {
+        final messenger = ScaffoldMessenger.maybeOf(context);
         try {
           await SupabaseApi.sendConnectionRequestOrg5(
             addresseeId: peerId,
             connectionType: 'friend',
           );
           await ref.read(membersProvider.notifier).refresh();
-          ScaffoldMessenger.of(context).showSnackBar(
+          messenger?.showSnackBar(
             const SnackBar(content: Text('Permintaan koneksi dikirim')),
           );
         } catch (e) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          messenger?.showSnackBar(
             SnackBar(content: Text('Gagal mengirim permintaan: $e')),
           );
         }
