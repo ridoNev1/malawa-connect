@@ -77,6 +77,49 @@ CREATE TYPE "public"."user_role" AS ENUM (
 
 ALTER TYPE "public"."user_role" OWNER TO "postgres";
 
+SET default_tablespace = '';
+
+SET default_table_access_method = "heap";
+
+
+CREATE TABLE IF NOT EXISTS "public"."connections" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "requester_id" "uuid" NOT NULL,
+    "addressee_id" "uuid" NOT NULL,
+    "status" "text" NOT NULL,
+    "connection_type" "text" DEFAULT 'friend'::"text" NOT NULL,
+    "organization_id" bigint DEFAULT 5 NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "connections_connection_type_check" CHECK (("connection_type" = ANY (ARRAY['friend'::"text", 'partner'::"text"]))),
+    CONSTRAINT "connections_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'accepted'::"text", 'rejected'::"text", 'blocked'::"text"])))
+);
+
+
+ALTER TABLE "public"."connections" OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."accept_connection_request_org5"("p_requester_id" "uuid") RETURNS "public"."connections"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_row public.connections%ROWTYPE;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Must be authenticated'; END IF;
+  UPDATE public.connections
+     SET status='accepted', updated_at=now()
+   WHERE requester_id=p_requester_id AND addressee_id=v_uid AND organization_id=5 AND status='pending'
+   RETURNING * INTO v_row;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Request not found'; END IF;
+  RETURN v_row;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."accept_connection_request_org5"("p_requester_id" "uuid") OWNER TO "postgres";
+
 
 CREATE OR REPLACE FUNCTION "public"."adjust_inventory_stock"("p_location_id" bigint, "p_ingredient_id" bigint, "p_adjustment_quantity" numeric, "p_is_addition" boolean) RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
@@ -403,10 +446,6 @@ $$;
 
 ALTER FUNCTION "public"."assign_staff_to_locations_v2"("p_staff_id" "uuid", "p_location_ids" bigint[]) OWNER TO "postgres";
 
-SET default_tablespace = '';
-
-SET default_table_access_method = "heap";
-
 
 CREATE TABLE IF NOT EXISTS "public"."customers" (
     "id" bigint NOT NULL,
@@ -433,6 +472,73 @@ CREATE TABLE IF NOT EXISTS "public"."customers" (
 
 
 ALTER TABLE "public"."customers" OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."auth_sync_customer_login_org5"("p_phone" "text", "p_full_name" "text" DEFAULT NULL::"text", "p_location_id" bigint DEFAULT NULL::bigint) RETURNS "public"."customers"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_customer   public.customers%ROWTYPE;
+  v_member_id  uuid := auth.uid();
+  v_org_id     bigint := 5;  -- fixed per request
+BEGIN
+  IF p_phone IS NULL OR btrim(p_phone) = '' THEN
+    RAISE EXCEPTION 'Phone number is required';
+  END IF;
+
+  IF v_member_id IS NULL THEN
+    RAISE EXCEPTION 'Must be authenticated';
+  END IF;
+
+  -- Find by phone within org 5 (or legacy rows without org)
+  SELECT *
+    INTO v_customer
+  FROM public.customers
+  WHERE phone_number = p_phone
+    AND (organization_id IS NULL OR organization_id = v_org_id)
+  FOR UPDATE;
+
+  IF FOUND THEN
+    -- Update existing row; ensure it is linked to current member and org 5
+    UPDATE public.customers
+       SET member_id        = v_member_id,
+           full_name        = COALESCE(p_full_name, full_name),
+           location_id      = COALESCE(p_location_id, location_id),
+           organization_id  = COALESCE(organization_id, v_org_id),
+           last_visit_at    = COALESCE(last_visit_at, now()),
+           updated_at       = now()
+     WHERE id = v_customer.id
+     RETURNING * INTO v_customer;
+  ELSE
+    -- Insert new row under org 5
+    INSERT INTO public.customers (
+      full_name,
+      phone_number,
+      organization_id,
+      member_id,
+      location_id,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      COALESCE(p_full_name, p_phone, 'Member'),
+      p_phone,
+      v_org_id,
+      v_member_id,
+      p_location_id,
+      now(),
+      now()
+    )
+    RETURNING * INTO v_customer;
+  END IF;
+
+  RETURN v_customer;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."auth_sync_customer_login_org5"("p_phone" "text", "p_full_name" "text", "p_location_id" bigint) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."auth_upsert_customer_by_phone"("p_phone" "text", "p_member_id" "uuid" DEFAULT NULL::"uuid", "p_full_name" "text" DEFAULT NULL::"text", "p_location_id" bigint DEFAULT NULL::bigint, "p_preference" "text" DEFAULT NULL::"text", "p_interests" "text"[] DEFAULT NULL::"text"[], "p_gallery_images" "text"[] DEFAULT NULL::"text"[], "p_profile_image_url" "text" DEFAULT NULL::"text", "p_date_of_birth" "date" DEFAULT NULL::"date", "p_gender" "text" DEFAULT NULL::"text", "p_visibility" boolean DEFAULT NULL::boolean, "p_search_radius_km" numeric DEFAULT NULL::numeric, "p_notes" "text" DEFAULT NULL::"text") RETURNS "public"."customers"
@@ -1207,6 +1313,28 @@ $$;
 ALTER FUNCTION "public"."create_user_profile"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."decline_connection_request_org5"("p_requester_id" "uuid") RETURNS "public"."connections"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_row public.connections%ROWTYPE;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Must be authenticated'; END IF;
+  UPDATE public.connections
+     SET status='rejected', updated_at=now()
+   WHERE requester_id=p_requester_id AND addressee_id=v_uid AND organization_id=5 AND status='pending'
+   RETURNING * INTO v_row;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Request not found'; END IF;
+  RETURN v_row;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."decline_connection_request_org5"("p_requester_id" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."decrement_ingredients_from_order"("p_order_id" bigint, "p_location_id" bigint) RETURNS "void"
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
@@ -1484,6 +1612,28 @@ $$;
 ALTER FUNCTION "public"."get_current_organization_id"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."get_current_presence_org5"() RETURNS "jsonb"
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  SELECT to_jsonb(t) FROM (
+    SELECT up.location_id,
+           l.name AS location_name,
+           up.check_in_at AS check_in_time,
+           up.last_heartbeat_at
+    FROM public.user_presence up
+    JOIN public.locations l ON l.id = up.location_id AND l.organization_id = 5
+    WHERE up.user_id = auth.uid()
+      AND up.check_out_at IS NULL
+    ORDER BY up.check_in_at DESC
+    LIMIT 1
+  ) t;
+$$;
+
+
+ALTER FUNCTION "public"."get_current_presence_org5"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."get_current_role"() RETURNS "text"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1526,6 +1676,21 @@ $$;
 
 
 ALTER FUNCTION "public"."get_customer_detail_by_member_id"("p_member_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_customer_detail_by_member_id_org5"("p_member_id" "uuid") RETURNS "public"."customers"
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  SELECT c.*
+  FROM public.customers c
+  WHERE c.member_id = p_member_id
+    AND c.organization_id = 5
+  LIMIT 1;
+$$;
+
+
+ALTER FUNCTION "public"."get_customer_detail_by_member_id_org5"("p_member_id" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."get_daily_sales_revenue"("days_limit" integer) RETURNS TABLE("sale_date" "date", "revenue" numeric)
@@ -1794,6 +1959,23 @@ END $$;
 ALTER FUNCTION "public"."get_dashboard_cards_data_v2"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."get_discounts_org5"("p_only_active" boolean DEFAULT true, "p_limit" integer DEFAULT 20) RETURNS TABLE("id" bigint, "name" "text", "description" "text", "type" "text", "value" numeric, "is_active" boolean, "created_at" timestamp with time zone, "unique_code" "text", "organization_id" bigint, "image" "text", "valid_until" "date")
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  SELECT d.id, d.name, d.description, d.type, d.value, d.is_active,
+         d.created_at, d.unique_code, d.organization_id, d.image, d.valid_until
+  FROM public.discounts d
+  WHERE d.organization_id = 5
+    AND (p_only_active IS NULL OR p_only_active = false OR d.is_active = true)
+  ORDER BY COALESCE(d.valid_until, d.created_at::date) DESC, d.created_at DESC
+  LIMIT COALESCE(p_limit, 20);
+$$;
+
+
+ALTER FUNCTION "public"."get_discounts_org5"("p_only_active" boolean, "p_limit" integer) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."get_ingredient_total_stock_overview_v1"("search_query" "text" DEFAULT NULL::"text", "page_num" integer DEFAULT 1, "page_size" integer DEFAULT 20) RETURNS json
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1990,6 +2172,20 @@ $$;
 ALTER FUNCTION "public"."get_inventory_report"("p_location_id" bigint) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."get_locations_org5"() RETURNS TABLE("id" bigint, "name" "text", "address" "text", "lat" double precision, "lng" double precision, "geofence_radius_m" integer)
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  SELECT l.id, l.name, l.address, l.lat, l.lng, l.geofence_radius_m
+  FROM public.locations l
+  WHERE l.organization_id = 5
+  ORDER BY l.name;
+$$;
+
+
+ALTER FUNCTION "public"."get_locations_org5"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."get_main_warehouse_location_id"() RETURNS bigint
     LANGUAGE "sql" STABLE
     AS $$
@@ -2022,6 +2218,168 @@ $$;
 
 
 ALTER FUNCTION "public"."get_main_warehouse_v1"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_member_detail_org5"("p_id" "text") RETURNS "jsonb"
+    LANGUAGE "sql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  WITH base AS (
+    SELECT c.id::text AS id,
+           c.member_id,
+           c.location_id,
+           c.full_name AS name,
+           c.profile_image_url AS avatar,
+           c.preference,
+           c.gallery_images,
+           c.date_of_birth,
+           c.gender,
+           c.interests,
+           c.last_visit_at
+    FROM public.customers c
+    WHERE c.organization_id = 5
+      AND (c.id::text = p_id OR c.member_id::text = p_id)
+  ), pres AS (
+    SELECT up.user_id,
+           up.location_id,
+           up.last_heartbeat_at,
+           up.check_in_at
+    FROM public.user_presence up
+    WHERE up.check_out_at IS NULL
+  ), loc AS (
+    SELECT l.id, l.name FROM public.locations l WHERE l.organization_id = 5
+  )
+  SELECT to_jsonb(j) FROM (
+    SELECT b.*,
+      l.name AS location_name,
+      (p.user_id IS NOT NULL AND p.last_heartbeat_at >= now() - interval '120 seconds') AS "isOnline",
+      CASE
+        WHEN p.user_id IS NOT NULL
+          THEN to_char(COALESCE(p.last_heartbeat_at, p.check_in_at), 'YYYY-MM-DD"T"HH24:MI:SSZ')
+        WHEN b.last_visit_at IS NOT NULL
+          THEN to_char(b.last_visit_at, 'YYYY-MM-DD"T"HH24:MI:SSZ')
+        ELSE NULL
+      END AS "lastSeen"
+    FROM base b
+    LEFT JOIN pres p ON p.user_id = b.member_id
+    LEFT JOIN loc  l ON l.id = COALESCE(p.location_id, b.location_id)
+  ) j;
+$$;
+
+
+ALTER FUNCTION "public"."get_member_detail_org5"("p_id" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_members_org5"("p_tab" "text" DEFAULT 'nearest'::"text", "p_status" "text" DEFAULT 'Semua'::"text", "p_search" "text" DEFAULT ''::"text", "p_page" integer DEFAULT 1, "p_page_size" integer DEFAULT 10, "p_base_location_id" bigint DEFAULT NULL::bigint) RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_offset int := GREATEST((COALESCE(p_page,1)-1) * COALESCE(p_page_size,10), 0);
+  v_items jsonb;
+  v_base_loc bigint := p_base_location_id;
+BEGIN
+  IF p_tab = 'nearest' AND v_base_loc IS NULL THEN
+    SELECT location_id INTO v_base_loc FROM public.customers
+    WHERE member_id = v_uid AND organization_id = 5;
+  END IF;
+
+  WITH base AS (
+    SELECT c.id::text AS id,
+           c.member_id,
+           c.location_id,
+           c.full_name AS name,
+           c.profile_image_url AS avatar,
+           c.preference,
+           c.gallery_images,
+           c.date_of_birth,
+           c.gender,
+           c.interests,
+           c.last_visit_at
+    FROM public.customers c
+    WHERE c.organization_id = 5
+      AND c.member_id <> v_uid
+      AND (COALESCE(p_search,'') = '' OR c.full_name ILIKE '%'||p_search||'%')
+      -- IMPORTANT: do NOT filter nearest here; we will filter after joining presence
+  ),
+  pres AS (
+    SELECT up.user_id,
+           up.location_id,
+           up.last_heartbeat_at,
+           up.check_in_at
+    FROM public.user_presence up
+    WHERE up.check_out_at IS NULL
+  ),
+  loc AS (
+    SELECT l.id, l.name FROM public.locations l WHERE l.organization_id = 5
+  ),
+  joined AS (
+    SELECT b.*,
+           (p.user_id IS NOT NULL AND p.last_heartbeat_at >= now() - interval '120 seconds') AS "isOnline",
+           CASE
+             WHEN p.user_id IS NOT NULL
+               THEN to_char(COALESCE(p.last_heartbeat_at, p.check_in_at), 'YYYY-MM-DD"T"HH24:MI:SSZ')
+             WHEN b.last_visit_at IS NOT NULL
+               THEN to_char(b.last_visit_at, 'YYYY-MM-DD"T"HH24:MI:SSZ')
+             ELSE NULL
+           END AS "lastSeen",
+           COALESCE(p.location_id, b.location_id) AS effective_location_id,
+           l.name AS location_name,
+           '-'::text AS distance
+    FROM base b
+    LEFT JOIN pres p ON p.user_id = b.member_id
+    LEFT JOIN loc  l ON l.id = COALESCE(p.location_id, b.location_id)
+  ),
+  conns AS (
+    SELECT CASE WHEN c.requester_id = v_uid THEN c.addressee_id ELSE c.requester_id END AS peer_id,
+           c.connection_type,
+           c.status
+    FROM public.connections c
+    WHERE c.organization_id = 5
+      AND (c.requester_id = v_uid OR c.addressee_id = v_uid)
+  ),
+  filtered AS (
+    SELECT j.*, cc.status as connection_status, cc.connection_type as connection_type
+    FROM joined j
+    LEFT JOIN conns cc ON cc.peer_id = j.member_id
+    WHERE (
+      p_status IS NULL OR p_status = 'Semua'
+      OR (p_status = 'Online'   AND j."isOnline" = true)
+      OR (p_status = 'Friends'  AND cc.status = 'accepted' AND cc.connection_type = 'friend')
+      OR (p_status = 'Partners' AND cc.status = 'accepted' AND cc.connection_type = 'partner')
+    )
+    AND (
+      p_tab <> 'nearest' OR (
+        v_base_loc IS NOT NULL AND j.effective_location_id = v_base_loc
+      )
+    )
+  ),
+  counted AS (
+    SELECT COUNT(*) AS total FROM filtered
+  ),
+  page AS (
+    SELECT * FROM filtered
+    ORDER BY "isOnline" DESC, name ASC
+    OFFSET v_offset LIMIT COALESCE(p_page_size,10)
+  )
+  SELECT jsonb_build_object(
+    'items', COALESCE(jsonb_agg(to_jsonb(page)), '[]'::jsonb),
+    'page', COALESCE(p_page,1),
+    'pageSize', COALESCE(p_page_size,10),
+    'total', (SELECT total FROM counted),
+    'hasMore', ((SELECT total FROM counted) > (v_offset + COALESCE(p_page_size,10)))
+  ) INTO v_items
+  FROM page;
+
+  RETURN COALESCE(v_items, jsonb_build_object(
+    'items','[]'::jsonb,'page',COALESCE(p_page,1),'pageSize',COALESCE(p_page_size,10),'total',0,'hasMore',false
+  ));
+END;
+$$;
+
+
+ALTER FUNCTION "public"."get_members_org5"("p_tab" "text", "p_status" "text", "p_search" "text", "p_page" integer, "p_page_size" integer, "p_base_location_id" bigint) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."get_order_list"("p_location_id" bigint) RETURNS TABLE("id" bigint, "customer_name" "text", "table_name" "text", "staff_name" "text", "status" "public"."order_status_enum", "total_items" bigint, "final_amount" numeric, "created_at" timestamp with time zone, "order_details" "jsonb", "location_details" "jsonb")
@@ -3218,6 +3576,80 @@ $$;
 ALTER FUNCTION "public"."is_viewer_role_valid"("roles_to_check" "text"[]) OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."user_presence" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "location_id" bigint NOT NULL,
+    "check_in_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "last_heartbeat_at" timestamp with time zone,
+    "check_out_at" timestamp with time zone
+);
+
+
+ALTER TABLE "public"."user_presence" OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."presence_check_in_org5"("p_location_id" bigint) RETURNS "public"."user_presence"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_row public.user_presence%ROWTYPE;
+  v_org int := 5;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Must be authenticated'; END IF;
+
+  -- Validate location belongs to org 5
+  PERFORM 1 FROM public.locations l WHERE l.id = p_location_id AND l.organization_id = v_org;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Invalid location for org 5'; END IF;
+
+  -- Close existing active presence
+  UPDATE public.user_presence
+     SET check_out_at = now()
+   WHERE user_id = v_uid AND check_out_at IS NULL;
+
+  -- Insert new presence
+  INSERT INTO public.user_presence(user_id, location_id, check_in_at, last_heartbeat_at)
+  VALUES (v_uid, p_location_id, now(), now())
+  RETURNING * INTO v_row;
+
+  RETURN v_row;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."presence_check_in_org5"("p_location_id" bigint) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."presence_check_out_org5"() RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE v_uid uuid := auth.uid(); BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Must be authenticated'; END IF;
+  UPDATE public.user_presence SET check_out_at = now()
+   WHERE user_id = v_uid AND check_out_at IS NULL;
+END; $$;
+
+
+ALTER FUNCTION "public"."presence_check_out_org5"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."presence_heartbeat_org5"() RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE v_uid uuid := auth.uid(); BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Must be authenticated'; END IF;
+  UPDATE public.user_presence SET last_heartbeat_at = now()
+   WHERE user_id = v_uid AND check_out_at IS NULL;
+END; $$;
+
+
+ALTER FUNCTION "public"."presence_heartbeat_org5"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."request_stock_transfer_v2"("p_from_location_id" bigint, "p_to_location_id" bigint, "p_items" "jsonb") RETURNS bigint
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
@@ -3283,6 +3715,54 @@ END $$;
 
 
 ALTER FUNCTION "public"."request_stock_transfer_v2"("p_from_location_id" bigint, "p_to_location_id" bigint, "p_items" "jsonb") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."send_connection_request_org5"("p_addressee_id" "uuid", "p_connection_type" "text" DEFAULT 'friend'::"text") RETURNS "public"."connections"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_row public.connections%ROWTYPE;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Must be authenticated'; END IF;
+  IF p_addressee_id IS NULL OR p_addressee_id = v_uid THEN RAISE EXCEPTION 'Invalid addressee'; END IF;
+  IF p_connection_type NOT IN ('friend','partner') THEN RAISE EXCEPTION 'Invalid connection_type'; END IF;
+  -- Block check
+  IF EXISTS (
+    SELECT 1 FROM public.blocked_users b
+    WHERE b.organization_id = 5 AND ((b.blocker_id=v_uid AND b.blocked_id=p_addressee_id) OR (b.blocker_id=p_addressee_id AND b.blocked_id=v_uid))
+  ) THEN RAISE EXCEPTION 'Cannot connect: blocked'; END IF;
+
+  -- Existing connection?
+  SELECT * INTO v_row FROM public.connections c
+   WHERE c.organization_id=5
+     AND ((c.requester_id=v_uid AND c.addressee_id=p_addressee_id) OR (c.requester_id=p_addressee_id AND c.addressee_id=v_uid))
+   ORDER BY c.created_at DESC LIMIT 1;
+
+  IF FOUND THEN
+    IF v_row.status = 'accepted' THEN
+      RETURN v_row; -- already friends/partners
+    ELSIF v_row.status = 'pending' THEN
+      RETURN v_row; -- request already pending
+    ELSE
+      -- Re-initiate request
+      INSERT INTO public.connections(requester_id, addressee_id, status, connection_type, organization_id)
+      VALUES (v_uid, p_addressee_id, 'pending', p_connection_type, 5)
+      RETURNING * INTO v_row;
+      RETURN v_row;
+    END IF;
+  END IF;
+
+  INSERT INTO public.connections(requester_id, addressee_id, status, connection_type, organization_id)
+  VALUES (v_uid, p_addressee_id, 'pending', p_connection_type, 5)
+  RETURNING * INTO v_row;
+  RETURN v_row;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."send_connection_request_org5"("p_addressee_id" "uuid", "p_connection_type" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."set_customers_updated_at"() RETURNS "trigger"
@@ -3446,6 +3926,71 @@ $$;
 
 
 ALTER FUNCTION "public"."sync_product_options"("p_product_id" bigint, "p_option_group_ids" bigint[]) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."unfriend_org5"("p_peer_id" "uuid") RETURNS "public"."connections"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_row public.connections%ROWTYPE;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Must be authenticated'; END IF;
+  UPDATE public.connections
+     SET status='rejected', updated_at=now()
+   WHERE organization_id=5 AND status='accepted'
+     AND ((requester_id=v_uid AND addressee_id=p_peer_id) OR (requester_id=p_peer_id AND addressee_id=v_uid))
+   RETURNING * INTO v_row;
+  IF NOT FOUND THEN RAISE EXCEPTION 'No active connection to unfriend'; END IF;
+  RETURN v_row;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."unfriend_org5"("p_peer_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."update_customer_profile_org5"("p_full_name" "text" DEFAULT NULL::"text", "p_preference" "text" DEFAULT NULL::"text", "p_interests" "text"[] DEFAULT NULL::"text"[], "p_gallery_images" "text"[] DEFAULT NULL::"text"[], "p_profile_image_url" "text" DEFAULT NULL::"text", "p_date_of_birth" "date" DEFAULT NULL::"date", "p_gender" "text" DEFAULT NULL::"text", "p_visibility" boolean DEFAULT NULL::boolean, "p_search_radius_km" numeric DEFAULT NULL::numeric, "p_location_id" bigint DEFAULT NULL::bigint, "p_notes" "text" DEFAULT NULL::"text") RETURNS "public"."customers"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_member_id uuid := auth.uid();
+  v_org_id    bigint := 5;
+  v_row       public.customers%ROWTYPE;
+BEGIN
+  IF v_member_id IS NULL THEN
+    RAISE EXCEPTION 'Must be authenticated';
+  END IF;
+
+  UPDATE public.customers c
+     SET full_name         = COALESCE(p_full_name, c.full_name),
+         preference        = COALESCE(p_preference, c.preference),
+         interests         = COALESCE(p_interests, c.interests),
+         gallery_images    = COALESCE(p_gallery_images, c.gallery_images),
+         profile_image_url = COALESCE(p_profile_image_url, c.profile_image_url),
+         date_of_birth     = COALESCE(p_date_of_birth, c.date_of_birth),
+         gender            = COALESCE(p_gender, c.gender),
+         visibility        = COALESCE(p_visibility, c.visibility),
+         search_radius_km  = COALESCE(p_search_radius_km, c.search_radius_km),
+         location_id       = COALESCE(p_location_id, c.location_id),
+         notes             = COALESCE(p_notes, c.notes),
+         updated_at        = now()
+   WHERE c.member_id = v_member_id
+     AND c.organization_id = v_org_id
+  RETURNING * INTO v_row;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Customer row not found for current user in org 5';
+  END IF;
+
+  RETURN v_row;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."update_customer_profile_org5"("p_full_name" "text", "p_preference" "text", "p_interests" "text"[], "p_gallery_images" "text"[], "p_profile_image_url" "text", "p_date_of_birth" "date", "p_gender" "text", "p_visibility" boolean, "p_search_radius_km" numeric, "p_location_id" bigint, "p_notes" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."update_order_status"("p_order_id" bigint, "p_new_status" "public"."order_status_enum") RETURNS "void"
@@ -3665,6 +4210,17 @@ $_$;
 ALTER FUNCTION "public"."upsert_setting_for_active_org"("p_key" "text", "p_value" "text") OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."blocked_users" (
+    "blocker_id" "uuid" NOT NULL,
+    "blocked_id" "uuid" NOT NULL,
+    "organization_id" bigint DEFAULT 5 NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."blocked_users" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."cashier_sessions" (
     "id" bigint NOT NULL,
     "staff_id" "uuid" NOT NULL,
@@ -3736,6 +4292,8 @@ CREATE TABLE IF NOT EXISTS "public"."discounts" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "unique_code" "text" NOT NULL,
     "organization_id" bigint DEFAULT "public"."get_current_organization_id"() NOT NULL,
+    "image" "text",
+    "valid_until" "date",
     CONSTRAINT "discounts_type_check" CHECK (("type" = ANY (ARRAY['percentage'::"text", 'fixed_amount'::"text"])))
 );
 
@@ -3851,7 +4409,10 @@ CREATE TABLE IF NOT EXISTS "public"."locations" (
     "is_main_warehouse" boolean DEFAULT false NOT NULL,
     "email" "text",
     "phone_number" "text",
-    "organization_id" bigint DEFAULT "public"."get_current_organization_id"() NOT NULL
+    "organization_id" bigint DEFAULT "public"."get_current_organization_id"() NOT NULL,
+    "lat" double precision,
+    "lng" double precision,
+    "geofence_radius_m" integer DEFAULT 500 NOT NULL
 );
 
 
@@ -4212,6 +4773,11 @@ ALTER TABLE "public"."stock_transfers" ALTER COLUMN "id" ADD GENERATED BY DEFAUL
 
 
 
+ALTER TABLE ONLY "public"."blocked_users"
+    ADD CONSTRAINT "blocked_users_pkey" PRIMARY KEY ("blocker_id", "blocked_id");
+
+
+
 ALTER TABLE ONLY "public"."cashier_sessions"
     ADD CONSTRAINT "cashier_sessions_pkey" PRIMARY KEY ("id");
 
@@ -4219,6 +4785,11 @@ ALTER TABLE ONLY "public"."cashier_sessions"
 
 ALTER TABLE ONLY "public"."categories"
     ADD CONSTRAINT "categories_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."connections"
+    ADD CONSTRAINT "connections_pkey" PRIMARY KEY ("id");
 
 
 
@@ -4382,6 +4953,15 @@ ALTER TABLE ONLY "public"."stock_transfers"
 
 
 
+ALTER TABLE ONLY "public"."user_presence"
+    ADD CONSTRAINT "user_presence_pkey" PRIMARY KEY ("id");
+
+
+
+CREATE INDEX "idx_connections_users" ON "public"."connections" USING "btree" ("requester_id", "addressee_id");
+
+
+
 CREATE UNIQUE INDEX "idx_customers_member_id_unique" ON "public"."customers" USING "btree" ("member_id") WHERE ("member_id" IS NOT NULL);
 
 
@@ -4391,6 +4971,10 @@ CREATE INDEX "idx_customers_org_created_at" ON "public"."customers" USING "btree
 
 
 CREATE INDEX "idx_customers_org_createdat" ON "public"."customers" USING "btree" ("organization_id", "created_at");
+
+
+
+CREATE INDEX "idx_customers_phone_org" ON "public"."customers" USING "btree" ("phone_number", "organization_id");
 
 
 
@@ -4415,6 +4999,14 @@ CREATE INDEX "idx_sti_transfer_id" ON "public"."stock_transfer_items" USING "btr
 
 
 CREATE INDEX "idx_stock_transfers_org_status_request_date" ON "public"."stock_transfers" USING "btree" ("organization_id", "status", "request_date" DESC);
+
+
+
+CREATE INDEX "idx_user_presence_active" ON "public"."user_presence" USING "btree" ("user_id") WHERE ("check_out_at" IS NULL);
+
+
+
+CREATE INDEX "idx_user_presence_user" ON "public"."user_presence" USING "btree" ("user_id");
 
 
 
@@ -4638,6 +5230,11 @@ ALTER TABLE ONLY "public"."stock_transfers"
 
 
 
+ALTER TABLE ONLY "public"."user_presence"
+    ADD CONSTRAINT "user_presence_location_id_fkey" FOREIGN KEY ("location_id") REFERENCES "public"."locations"("id");
+
+
+
 CREATE POLICY "Allow admins to manage location products" ON "public"."location_products" TO "authenticated" USING ((( SELECT "public"."get_user_role"() AS "get_user_role") = ANY (ARRAY['owner'::"text", 'super_admin'::"text"]))) WITH CHECK ((( SELECT "public"."get_user_role"() AS "get_user_role") = ANY (ARRAY['owner'::"text", 'super_admin'::"text"])));
 
 
@@ -4829,6 +5426,21 @@ CREATE POLICY "cashier_sessions_insert_staff" ON "public"."cashier_sessions" FOR
 
 
 ALTER TABLE "public"."categories" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."connections" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "connections_insert_self" ON "public"."connections" FOR INSERT TO "authenticated" WITH CHECK (("requester_id" = "auth"."uid"()));
+
+
+
+CREATE POLICY "connections_select_self" ON "public"."connections" FOR SELECT TO "authenticated" USING ((("requester_id" = "auth"."uid"()) OR ("addressee_id" = "auth"."uid"())));
+
+
+
+CREATE POLICY "connections_update_self" ON "public"."connections" FOR UPDATE TO "authenticated" USING ((("requester_id" = "auth"."uid"()) OR ("addressee_id" = "auth"."uid"()))) WITH CHECK ((("requester_id" = "auth"."uid"()) OR ("addressee_id" = "auth"."uid"())));
+
 
 
 ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
@@ -5082,6 +5694,18 @@ ALTER TABLE "public"."organization_staff" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."organizations" ENABLE ROW LEVEL SECURITY;
 
 
+CREATE POLICY "presence_insert_self" ON "public"."user_presence" FOR INSERT TO "authenticated" WITH CHECK (("user_id" = "auth"."uid"()));
+
+
+
+CREATE POLICY "presence_select_self" ON "public"."user_presence" FOR SELECT TO "authenticated" USING (("user_id" = "auth"."uid"()));
+
+
+
+CREATE POLICY "presence_update_self" ON "public"."user_presence" FOR UPDATE TO "authenticated" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
+
+
+
 ALTER TABLE "public"."product_options" ENABLE ROW LEVEL SECURITY;
 
 
@@ -5181,10 +5805,25 @@ CREATE POLICY "stock_transfer_items_select_same_org" ON "public"."stock_transfer
 ALTER TABLE "public"."stock_transfers" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."user_presence" ENABLE ROW LEVEL SECURITY;
+
+
 GRANT USAGE ON SCHEMA "public" TO "postgres";
 GRANT USAGE ON SCHEMA "public" TO "anon";
 GRANT USAGE ON SCHEMA "public" TO "authenticated";
 GRANT USAGE ON SCHEMA "public" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."connections" TO "anon";
+GRANT ALL ON TABLE "public"."connections" TO "authenticated";
+GRANT ALL ON TABLE "public"."connections" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."accept_connection_request_org5"("p_requester_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."accept_connection_request_org5"("p_requester_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."accept_connection_request_org5"("p_requester_id" "uuid") TO "service_role";
 
 
 
@@ -5229,6 +5868,12 @@ GRANT ALL ON FUNCTION "public"."assign_staff_to_locations_v2"("p_staff_id" "uuid
 GRANT ALL ON TABLE "public"."customers" TO "anon";
 GRANT ALL ON TABLE "public"."customers" TO "authenticated";
 GRANT ALL ON TABLE "public"."customers" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."auth_sync_customer_login_org5"("p_phone" "text", "p_full_name" "text", "p_location_id" bigint) TO "anon";
+GRANT ALL ON FUNCTION "public"."auth_sync_customer_login_org5"("p_phone" "text", "p_full_name" "text", "p_location_id" bigint) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."auth_sync_customer_login_org5"("p_phone" "text", "p_full_name" "text", "p_location_id" bigint) TO "service_role";
 
 
 
@@ -5308,6 +5953,12 @@ GRANT ALL ON FUNCTION "public"."create_user_profile"() TO "service_role";
 
 
 
+GRANT ALL ON FUNCTION "public"."decline_connection_request_org5"("p_requester_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."decline_connection_request_org5"("p_requester_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."decline_connection_request_org5"("p_requester_id" "uuid") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."decrement_ingredients_from_order"("p_order_id" bigint, "p_location_id" bigint) TO "anon";
 GRANT ALL ON FUNCTION "public"."decrement_ingredients_from_order"("p_order_id" bigint, "p_location_id" bigint) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."decrement_ingredients_from_order"("p_order_id" bigint, "p_location_id" bigint) TO "service_role";
@@ -5364,6 +6015,12 @@ GRANT ALL ON FUNCTION "public"."get_current_organization_id"() TO "service_role"
 
 
 
+GRANT ALL ON FUNCTION "public"."get_current_presence_org5"() TO "anon";
+GRANT ALL ON FUNCTION "public"."get_current_presence_org5"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_current_presence_org5"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."get_current_role"() TO "anon";
 GRANT ALL ON FUNCTION "public"."get_current_role"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_current_role"() TO "service_role";
@@ -5373,6 +6030,12 @@ GRANT ALL ON FUNCTION "public"."get_current_role"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."get_customer_detail_by_member_id"("p_member_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."get_customer_detail_by_member_id"("p_member_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_customer_detail_by_member_id"("p_member_id" "uuid") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."get_customer_detail_by_member_id_org5"("p_member_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."get_customer_detail_by_member_id_org5"("p_member_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_customer_detail_by_member_id_org5"("p_member_id" "uuid") TO "service_role";
 
 
 
@@ -5400,6 +6063,12 @@ GRANT ALL ON FUNCTION "public"."get_dashboard_cards_data_v2"() TO "service_role"
 
 
 
+GRANT ALL ON FUNCTION "public"."get_discounts_org5"("p_only_active" boolean, "p_limit" integer) TO "anon";
+GRANT ALL ON FUNCTION "public"."get_discounts_org5"("p_only_active" boolean, "p_limit" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_discounts_org5"("p_only_active" boolean, "p_limit" integer) TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."get_ingredient_total_stock_overview_v1"("search_query" "text", "page_num" integer, "page_size" integer) TO "anon";
 GRANT ALL ON FUNCTION "public"."get_ingredient_total_stock_overview_v1"("search_query" "text", "page_num" integer, "page_size" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_ingredient_total_stock_overview_v1"("search_query" "text", "page_num" integer, "page_size" integer) TO "service_role";
@@ -5418,6 +6087,12 @@ GRANT ALL ON FUNCTION "public"."get_inventory_report"("p_location_id" bigint) TO
 
 
 
+GRANT ALL ON FUNCTION "public"."get_locations_org5"() TO "anon";
+GRANT ALL ON FUNCTION "public"."get_locations_org5"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_locations_org5"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."get_main_warehouse_location_id"() TO "anon";
 GRANT ALL ON FUNCTION "public"."get_main_warehouse_location_id"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_main_warehouse_location_id"() TO "service_role";
@@ -5427,6 +6102,18 @@ GRANT ALL ON FUNCTION "public"."get_main_warehouse_location_id"() TO "service_ro
 GRANT ALL ON FUNCTION "public"."get_main_warehouse_v1"() TO "anon";
 GRANT ALL ON FUNCTION "public"."get_main_warehouse_v1"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_main_warehouse_v1"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."get_member_detail_org5"("p_id" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."get_member_detail_org5"("p_id" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_member_detail_org5"("p_id" "text") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."get_members_org5"("p_tab" "text", "p_status" "text", "p_search" "text", "p_page" integer, "p_page_size" integer, "p_base_location_id" bigint) TO "anon";
+GRANT ALL ON FUNCTION "public"."get_members_org5"("p_tab" "text", "p_status" "text", "p_search" "text", "p_page" integer, "p_page_size" integer, "p_base_location_id" bigint) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_members_org5"("p_tab" "text", "p_status" "text", "p_search" "text", "p_page" integer, "p_page_size" integer, "p_base_location_id" bigint) TO "service_role";
 
 
 
@@ -5527,9 +6214,39 @@ GRANT ALL ON FUNCTION "public"."is_viewer_role_valid"("roles_to_check" "text"[])
 
 
 
+GRANT ALL ON TABLE "public"."user_presence" TO "anon";
+GRANT ALL ON TABLE "public"."user_presence" TO "authenticated";
+GRANT ALL ON TABLE "public"."user_presence" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."presence_check_in_org5"("p_location_id" bigint) TO "anon";
+GRANT ALL ON FUNCTION "public"."presence_check_in_org5"("p_location_id" bigint) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."presence_check_in_org5"("p_location_id" bigint) TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."presence_check_out_org5"() TO "anon";
+GRANT ALL ON FUNCTION "public"."presence_check_out_org5"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."presence_check_out_org5"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."presence_heartbeat_org5"() TO "anon";
+GRANT ALL ON FUNCTION "public"."presence_heartbeat_org5"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."presence_heartbeat_org5"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."request_stock_transfer_v2"("p_from_location_id" bigint, "p_to_location_id" bigint, "p_items" "jsonb") TO "anon";
 GRANT ALL ON FUNCTION "public"."request_stock_transfer_v2"("p_from_location_id" bigint, "p_to_location_id" bigint, "p_items" "jsonb") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."request_stock_transfer_v2"("p_from_location_id" bigint, "p_to_location_id" bigint, "p_items" "jsonb") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."send_connection_request_org5"("p_addressee_id" "uuid", "p_connection_type" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."send_connection_request_org5"("p_addressee_id" "uuid", "p_connection_type" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."send_connection_request_org5"("p_addressee_id" "uuid", "p_connection_type" "text") TO "service_role";
 
 
 
@@ -5560,6 +6277,18 @@ GRANT ALL ON FUNCTION "public"."sync_all_product_stocks_by_location"("p_location
 GRANT ALL ON FUNCTION "public"."sync_product_options"("p_product_id" bigint, "p_option_group_ids" bigint[]) TO "anon";
 GRANT ALL ON FUNCTION "public"."sync_product_options"("p_product_id" bigint, "p_option_group_ids" bigint[]) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."sync_product_options"("p_product_id" bigint, "p_option_group_ids" bigint[]) TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."unfriend_org5"("p_peer_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."unfriend_org5"("p_peer_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."unfriend_org5"("p_peer_id" "uuid") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."update_customer_profile_org5"("p_full_name" "text", "p_preference" "text", "p_interests" "text"[], "p_gallery_images" "text"[], "p_profile_image_url" "text", "p_date_of_birth" "date", "p_gender" "text", "p_visibility" boolean, "p_search_radius_km" numeric, "p_location_id" bigint, "p_notes" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."update_customer_profile_org5"("p_full_name" "text", "p_preference" "text", "p_interests" "text"[], "p_gallery_images" "text"[], "p_profile_image_url" "text", "p_date_of_birth" "date", "p_gender" "text", "p_visibility" boolean, "p_search_radius_km" numeric, "p_location_id" bigint, "p_notes" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."update_customer_profile_org5"("p_full_name" "text", "p_preference" "text", "p_interests" "text"[], "p_gallery_images" "text"[], "p_profile_image_url" "text", "p_date_of_birth" "date", "p_gender" "text", "p_visibility" boolean, "p_search_radius_km" numeric, "p_location_id" bigint, "p_notes" "text") TO "service_role";
 
 
 
@@ -5598,6 +6327,12 @@ REVOKE ALL ON FUNCTION "public"."upsert_setting_for_active_org"("p_key" "text", 
 GRANT ALL ON FUNCTION "public"."upsert_setting_for_active_org"("p_key" "text", "p_value" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."upsert_setting_for_active_org"("p_key" "text", "p_value" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."upsert_setting_for_active_org"("p_key" "text", "p_value" "text") TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."blocked_users" TO "anon";
+GRANT ALL ON TABLE "public"."blocked_users" TO "authenticated";
+GRANT ALL ON TABLE "public"."blocked_users" TO "service_role";
 
 
 
